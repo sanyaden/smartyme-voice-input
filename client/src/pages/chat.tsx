@@ -943,10 +943,21 @@ export default function ChatPage() {
 
         {/* Voice Compatibility Information */}
         {voice.deviceInfo && voice.deviceInfo.browserSupport !== 'full' && (
-          <VoiceCompatibilityFallback 
-            deviceInfo={voice.deviceInfo}
-            onDismiss={() => setDeviceCompatibility(null)}
-          />
+          <Card className="mb-3 p-3 bg-yellow-50 border-yellow-200">
+            <div className="flex items-start space-x-2">
+              <AlertTriangle className="h-4 w-4 text-yellow-600 mt-0.5" />
+              <div className="flex-1">
+                <p className="text-sm text-yellow-800">
+                  Voice input may have limited support on {voice.deviceInfo.browser}.
+                  {voice.deviceInfo.alternatives?.[0] && (
+                    <span className="block mt-1 text-xs">
+                      Tip: {voice.deviceInfo.alternatives[0]}
+                    </span>
+                  )}
+                </p>
+              </div>
+            </div>
+          </Card>
         )}
         
         <div className="flex items-center space-x-2">
