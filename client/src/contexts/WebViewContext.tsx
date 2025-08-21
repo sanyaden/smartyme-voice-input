@@ -42,20 +42,24 @@ export function WebViewProvider({ children }: WebViewProviderProps) {
     setLessonId(lessonIdParam);
     setCourseId(courseIdParam);
 
-    // Handle auth token from URL or Flutter
+    // Handle auth token from URL
     if (tokenParam) {
-      flutterBridge.handleAuthToken(tokenParam);
       setAuthToken(tokenParam);
+      // Store in sessionStorage for persistence
+      sessionStorage.setItem('authToken', tokenParam);
     } else {
-      const storedToken = flutterBridge.getAuthToken();
-      setAuthToken(storedToken);
+      // Try to get from sessionStorage
+      const storedToken = sessionStorage.getItem('authToken');
+      if (storedToken) {
+        setAuthToken(storedToken);
+      }
     }
 
     // Setup Flutter message listeners
     const unsubscribeAuth = flutterBridge.onFlutterMessage('auth', (data) => {
       if (data.token) {
-        flutterBridge.handleAuthToken(data.token);
         setAuthToken(data.token);
+        sessionStorage.setItem('authToken', data.token);
       }
     });
 

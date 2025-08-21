@@ -29,6 +29,8 @@ eggs/
 .eggs/
 lib/
 lib64/
+# Allow client lib folder
+!client/src/lib/
 parts/
 sdist/
 var/
