@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { flutterBridge } from '@/lib/flutter-bridge';
 import { useSpeechRecognition, type DeviceCompatibilityInfo } from './useSpeechRecognition';
+import { debugLog } from '@/lib/debug';
 
 export interface WebViewVoiceInputOptions {
   onResult?: (transcript: string, isFinal: boolean) => void;
@@ -72,16 +73,16 @@ export function useWebViewVoiceInput({
           
           if (flutterVoiceAvailable.current && preferFlutterVoice) {
             setInputMethod('flutter');
-            console.log('[WebViewVoice] Flutter voice input available and selected');
+            debugLog('voice', '[WebViewVoice] Flutter voice input available and selected');
           } else if (browserSpeech.isSupported) {
             setInputMethod('browser');
-            console.log('[WebViewVoice] Using browser voice input');
+            debugLog('voice', '[WebViewVoice] Using browser voice input');
           } else {
             setInputMethod('none');
-            console.log('[WebViewVoice] No voice input available');
+            debugLog('voice', '[WebViewVoice] No voice input available');
           }
         } catch (error) {
-          console.log('[WebViewVoice] Flutter voice check failed, falling back to browser');
+          debugLog('voice', '[WebViewVoice] Flutter voice check failed, falling back to browser');
           if (browserSpeech.isSupported) {
             setInputMethod('browser');
           } else {
@@ -110,7 +111,7 @@ export function useWebViewVoiceInput({
 
       // Setup voice input result listener
       const unsubResult = flutterBridge.onVoiceInputResult((transcript, isFinal) => {
-        console.log('[WebViewVoice] Flutter voice result:', { transcript, isFinal });
+        debugLog('voice', '[WebViewVoice] Flutter voice result:', { transcript, isFinal });
         
         if (isFinal) {
           setFlutterTranscript(prev => prev + transcript);
@@ -124,13 +125,13 @@ export function useWebViewVoiceInput({
 
       // Setup voice input error listener
       const unsubError = flutterBridge.onVoiceInputError((error) => {
-        console.error('[WebViewVoice] Flutter voice error:', error);
+        debugLog('voice', '[WebViewVoice] Flutter voice error:', error);
         setIsFlutterListening(false);
         onError?.(error);
         
         // Try fallback to browser if Flutter fails
         if (browserSpeech.isSupported && error.includes('not available')) {
-          console.log('[WebViewVoice] Falling back to browser voice input');
+          debugLog('voice', '[WebViewVoice] Falling back to browser voice input');
           setInputMethod('browser');
           // Automatically start browser speech if Flutter failed while listening
           if (isFlutterListening) {
@@ -141,7 +142,7 @@ export function useWebViewVoiceInput({
 
       // Setup voice input status listener
       const unsubStatus = flutterBridge.onVoiceInputStatus((isListening) => {
-        console.log('[WebViewVoice] Flutter voice status:', isListening);
+        debugLog('voice', '[WebViewVoice] Flutter voice status:', isListening);
         setIsFlutterListening(isListening);
         
         if (isListening) {
@@ -162,7 +163,7 @@ export function useWebViewVoiceInput({
 
   // Start listening function
   const startListening = useCallback(async () => {
-    console.log('[WebViewVoice] Start listening, method:', inputMethod);
+    debugLog('voice', '[WebViewVoice] Start listening, method:', inputMethod);
     
     if (inputMethod === 'flutter') {
       try {
@@ -171,12 +172,12 @@ export function useWebViewVoiceInput({
         await flutterBridge.startVoiceInput();
         setIsFlutterListening(true);
       } catch (error) {
-        console.error('[WebViewVoice] Failed to start Flutter voice:', error);
+        debugLog('voice', '[WebViewVoice] Failed to start Flutter voice:', error);
         onError?.('Failed to start voice input. Please check microphone permissions.');
         
         // Try fallback to browser
         if (browserSpeech.isSupported) {
-          console.log('[WebViewVoice] Attempting browser fallback');
+          debugLog('voice', '[WebViewVoice] Attempting browser fallback');
           setInputMethod('browser');
           await browserSpeech.startListening();
         }
@@ -190,11 +191,11 @@ export function useWebViewVoiceInput({
 
   // Stop listening function
   const stopListening = useCallback(() => {
-    console.log('[WebViewVoice] Stop listening, method:', inputMethod);
+    debugLog('voice', '[WebViewVoice] Stop listening, method:', inputMethod);
     
     if (inputMethod === 'flutter' && isFlutterListening) {
       flutterBridge.stopVoiceInput().catch(error => {
-        console.error('[WebViewVoice] Failed to stop Flutter voice:', error);
+        debugLog('voice', '[WebViewVoice] Failed to stop Flutter voice:', error);
       });
       setIsFlutterListening(false);
     } else if (inputMethod === 'browser') {

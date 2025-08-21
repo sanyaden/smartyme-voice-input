@@ -1,6 +1,8 @@
 // Flutter WebView Bridge for bidirectional communication
 // Handles voice input and other Flutter-JavaScript interactions
 
+import { debugLog } from './debug';
+
 export interface FlutterMessage {
   type: string;
   payload?: any;
@@ -61,7 +63,7 @@ class FlutterBridge {
     
     this.isWebViewCache = hasFlutterInAppWebView || hasFlutterChannel || hasWebKit || isWebViewUA;
     
-    console.log('[FlutterBridge] WebView detection:', {
+    debugLog('flutter', '[FlutterBridge] WebView detection:', {
       hasFlutterInAppWebView,
       hasFlutterChannel,
       hasWebKit,
@@ -80,9 +82,9 @@ class FlutterBridge {
     try {
       const response = await this.sendToFlutter('check_voice_capability', {});
       this.voiceInputAvailable = response?.available === true;
-      console.log('[FlutterBridge] Voice input available:', this.voiceInputAvailable);
+      debugLog('flutter', '[FlutterBridge] Voice input available:', this.voiceInputAvailable);
     } catch (error) {
-      console.log('[FlutterBridge] Voice input check failed, assuming unavailable');
+      debugLog('flutter', '[FlutterBridge] Voice input check failed, assuming unavailable');
       this.voiceInputAvailable = false;
     }
   }
@@ -92,7 +94,7 @@ class FlutterBridge {
     // Listen for Flutter InAppWebView messages
     if (window.flutter_inappwebview) {
       // InAppWebView uses promises for communication
-      console.log('[FlutterBridge] Flutter InAppWebView detected');
+      debugLog('flutter', '[FlutterBridge] Flutter InAppWebView detected');
     }
 
     // Listen for standard postMessage events
@@ -110,7 +112,7 @@ class FlutterBridge {
           this.handleFlutterMessage(message);
         }
       } catch (error) {
-        console.error('[FlutterBridge] Error parsing message:', error);
+        debugLog('flutter', '[FlutterBridge] Error parsing message:', error);
       }
     });
 
@@ -120,14 +122,14 @@ class FlutterBridge {
         const message = JSON.parse(messageStr);
         this.handleFlutterMessage(message);
       } catch (error) {
-        console.error('[FlutterBridge] Error handling Flutter message:', error);
+        debugLog('flutter', '[FlutterBridge] Error handling Flutter message:', error);
       }
     };
   }
 
   // Handle incoming messages from Flutter
   private handleFlutterMessage(message: FlutterMessage): void {
-    console.log('[FlutterBridge] Received message:', message);
+    debugLog('flutter', '[FlutterBridge] Received message:', message);
     
     const handlers = this.messageHandlers.get(message.type);
     if (handlers) {
@@ -135,7 +137,7 @@ class FlutterBridge {
         try {
           handler(message.payload);
         } catch (error) {
-          console.error('[FlutterBridge] Error in message handler:', error);
+          debugLog('flutter', '[FlutterBridge] Error in message handler:', error);
         }
       });
     }
@@ -149,16 +151,16 @@ class FlutterBridge {
       timestamp: Date.now()
     };
 
-    console.log('[FlutterBridge] Sending to Flutter:', message);
+    debugLog('flutter', '[FlutterBridge] Sending to Flutter:', message);
 
     // Try Flutter InAppWebView handler first (most common)
     if (window.flutter_inappwebview?.callHandler) {
       try {
         const response = await window.flutter_inappwebview.callHandler(type, payload);
-        console.log('[FlutterBridge] InAppWebView response:', response);
+        debugLog('flutter', '[FlutterBridge] InAppWebView response:', response);
         return response;
       } catch (error) {
-        console.error('[FlutterBridge] InAppWebView handler error:', error);
+        debugLog('flutter', '[FlutterBridge] InAppWebView handler error:', error);
       }
     }
 
@@ -168,7 +170,7 @@ class FlutterBridge {
         window.FlutterChannel.postMessage(JSON.stringify(message));
         return Promise.resolve();
       } catch (error) {
-        console.error('[FlutterBridge] FlutterChannel error:', error);
+        debugLog('flutter', '[FlutterBridge] FlutterChannel error:', error);
       }
     }
 
@@ -178,7 +180,7 @@ class FlutterBridge {
         window.webkit.messageHandlers.flutterChannel.postMessage(message);
         return Promise.resolve();
       } catch (error) {
-        console.error('[FlutterBridge] WKWebView handler error:', error);
+        debugLog('flutter', '[FlutterBridge] WKWebView handler error:', error);
       }
     }
 
@@ -187,7 +189,7 @@ class FlutterBridge {
       window.parent.postMessage(message, '*');
       return Promise.resolve();
     } catch (error) {
-      console.error('[FlutterBridge] PostMessage error:', error);
+      debugLog('flutter', '[FlutterBridge] PostMessage error:', error);
       throw new Error('No Flutter communication channel available');
     }
   }

@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { useSpeechRecognition, type DeviceCompatibilityInfo } from './useSpeechRecognition';
+import { debugLog } from '../lib/debug';
 
 // Detect if running in Flutter InAppWebView
 function isInFlutterWebView(): boolean {
@@ -89,7 +90,7 @@ export function useFlutterWebViewVoice({
   // Custom compatibility check for WebView
   const handleCompatibilityCheck = useCallback((isSupported: boolean, deviceInfo: DeviceCompatibilityInfo) => {
     if (isWebView) {
-      console.log('[FlutterWebViewVoice] Running in Flutter WebView:', webViewInfo);
+      debugLog('webview', '[FlutterWebViewVoice] Running in Flutter WebView:', webViewInfo);
       
       // Override compatibility for known working WebView configurations
       if (webViewInfo?.platform === 'ios' && webViewInfo.browser === 'safari-webview') {
@@ -105,7 +106,7 @@ export function useFlutterWebViewVoice({
   
   // Handle WebView-specific errors
   const handleWebViewError = useCallback((error: string, errorType?: string) => {
-    console.error('[FlutterWebViewVoice] Error:', error, errorType);
+    debugLog('voice', '[FlutterWebViewVoice] Error:', error, errorType);
     
     // Check if it's a recoverable error in WebView
     const isRecoverableError = errorType === 'no-speech' || 
@@ -113,7 +114,7 @@ export function useFlutterWebViewVoice({
                                errorType === 'immediate-end';
     
     if (isWebView && autoRetry && isRecoverableError && retryCount < maxRetries) {
-      console.log(`[FlutterWebViewVoice] Retrying... (attempt ${retryCount + 1}/${maxRetries})`);
+      debugLog('voice', `[FlutterWebViewVoice] Retrying... (attempt ${retryCount + 1}/${maxRetries}`);
       
       // Clear any existing timeout
       if (retryTimeoutRef.current) {
@@ -179,7 +180,7 @@ export function useFlutterWebViewVoice({
   // Enhanced start listening for WebView
   const startListening = useCallback(async () => {
     if (isWebView) {
-      console.log('[FlutterWebViewVoice] Starting voice input in WebView environment');
+      debugLog('voice', '[FlutterWebViewVoice] Starting voice input in WebView environment');
       
       // Check if we're in a secure context (required for speech API)
       if (!window.isSecureContext) {
@@ -190,7 +191,7 @@ export function useFlutterWebViewVoice({
       // For iOS WebView, we might need to trigger user interaction first
       if (webViewInfo?.platform === 'ios') {
         // iOS requires user gesture for audio APIs
-        console.log('[FlutterWebViewVoice] iOS WebView detected, ensuring user gesture');
+        debugLog('webview', '[FlutterWebViewVoice] iOS WebView detected, ensuring user gesture');
       }
     }
     
@@ -200,7 +201,7 @@ export function useFlutterWebViewVoice({
     try {
       await speechRecognition.startListening();
     } catch (error) {
-      console.error('[FlutterWebViewVoice] Failed to start:', error);
+      debugLog('voice', '[FlutterWebViewVoice] Failed to start:', error);
       if (isWebView) {
         onError?.('Voice input failed to start. Please ensure microphone permissions are granted in your device settings.');
       }

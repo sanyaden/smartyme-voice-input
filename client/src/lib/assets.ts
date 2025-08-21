@@ -1,11 +1,41 @@
-// Asset management for images and other resources
+/**
+ * Centralized Asset Imports
+ * 
+ * This file centralizes all asset imports to prevent circular dependencies
+ * and temporal dead zone errors during bundling.
+ */
 
-// Mr. Smart avatar
-export const mrSmartImage = "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Ccircle cx='50' cy='50' r='45' fill='%234F46E5'/%3E%3Ctext x='50' y='50' text-anchor='middle' dy='.35em' fill='white' font-size='40' font-weight='bold'%3EMS%3C/text%3E%3C/svg%3E";
+// Import all assets first
+import mrSmartImageSrc from "@assets/mr-smart.png";
+import rolePlayImageSrc from "@assets/Role-play-a-situation.png";
+import quizImageSrc from "@assets/take-the-quiz.png";
+import lessonQuizImageSrc from "@assets/image 56_1749809015467.png";
+import phraseDetoxImageSrc from "@assets/Phrase-detox-coach.png";
+import clarityRewriterImageSrc from "@assets/image 54_1749810030004.png";
 
-// Get scenario-specific image
-export function getScenarioImage(scenarioTitle: string): string {
-  // Return a default or scenario-specific image
-  // For now, return a placeholder
-  return `data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 200 150'%3E%3Crect width='200' height='150' fill='%23E5E7EB'/%3E%3Ctext x='100' y='75' text-anchor='middle' dy='.35em' fill='%236B7280' font-size='14'%3E${encodeURIComponent(scenarioTitle)}%3C/text%3E%3C/svg%3E`;
+// Export for other components to use
+export const mrSmartImage = mrSmartImageSrc;
+export const rolePlayImage = rolePlayImageSrc;
+export const quizImage = quizImageSrc;
+export const lessonQuizImage = lessonQuizImageSrc;
+export const phraseDetoxImage = phraseDetoxImageSrc;
+export const clarityRewriterImage = clarityRewriterImageSrc;
+
+// Function to get the appropriate image for each scenario
+export function getScenarioImage(title: string): string {
+  const titleLower = title.toLowerCase();
+  
+  if (titleLower.includes("role play")) {
+    return rolePlayImage;
+  } else if (titleLower.includes("quick quiz on") || titleLower.includes("quiz on this lesson")) {
+    return lessonQuizImage;
+  } else if (titleLower.includes("quiz") || titleLower.includes("diagnostic")) {
+    return quizImage;
+  } else if (titleLower.includes("phrase") || titleLower.includes("detox")) {
+    return phraseDetoxImage;
+  } else if (titleLower.includes("clarity rewriter")) {
+    return clarityRewriterImage;
+  }
+  
+  return quizImage; // fallback
 }

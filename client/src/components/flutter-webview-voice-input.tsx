@@ -3,6 +3,7 @@ import { Mic, MicOff, Keyboard, AlertCircle, Info, Check } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { Card, CardContent } from "@/components/ui/card";
+import { debugLog } from "@/lib/debug";
 import { Badge } from "@/components/ui/badge";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { useFlutterWebViewVoice } from "@/hooks/useFlutterWebViewVoice";
@@ -41,7 +42,7 @@ export function FlutterWebViewVoiceInput({
       }
     },
     onError: (error) => {
-      console.error('[VoiceInput] Error:', error);
+      debugLog('voice', '[VoiceInput] Error:', error);
       setVoiceAttempts(prev => prev + 1);
       
       // After 2 failed attempts, suggest keyboard fallback
@@ -54,11 +55,11 @@ export function FlutterWebViewVoiceInput({
       }
     },
     onStart: () => {
-      console.log('[VoiceInput] Started');
+      debugLog('voice', '[VoiceInput] Started');
       setShowFallbackAlert(false);
     },
     onEnd: () => {
-      console.log('[VoiceInput] Ended');
+      debugLog('voice', '[VoiceInput] Ended');
     },
     autoRetry: true,
     maxRetries: 2
@@ -73,7 +74,7 @@ export function FlutterWebViewVoiceInput({
         setShowFallbackAlert(true);
       } else {
         // Test voice capability
-        console.log('[VoiceInput] WebView detected, voice support:', voice.isSupported);
+        debugLog('webview', '[VoiceInput] WebView detected, voice support:', voice.isSupported);
       }
     }
   }, [voice.isWebView, voice.isSupported]);
@@ -85,7 +86,7 @@ export function FlutterWebViewVoiceInput({
       try {
         await voice.startListening();
       } catch (error) {
-        console.error('[VoiceInput] Failed to start:', error);
+        debugLog('voice', '[VoiceInput] Failed to start:', error);
         setInputMode('keyboard');
         setShowFallbackAlert(true);
       }

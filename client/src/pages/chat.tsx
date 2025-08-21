@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useRef, useMemo, useCallback } from "react";
 import { useLocation } from "wouter";
 import { useMutation } from "@tanstack/react-query";
 import { ArrowRight, X, Mic, MicOff, RotateCcw, AlertTriangle, Info } from "lucide-react";
@@ -7,7 +7,6 @@ import TypingIndicator from "@/components/typing-indicator";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Card, CardContent } from "@/components/ui/card";
-import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { apiRequest } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
 import { usePageTitle } from "@/hooks/use-page-title";
@@ -17,6 +16,7 @@ import { useWebViewNavigation } from "@/hooks/useWebViewNavigation";
 import { getWebViewParams } from "@/contexts/WebViewContext";
 import { useFlutterWebViewVoice } from "@/hooks/useFlutterWebViewVoice";
 import { FlutterWebViewVoiceInput } from "@/components/flutter-webview-voice-input";
+import { debugLog } from "@/lib/debug";
 
 interface ChatMessage {
   role: "user" | "assistant";
@@ -53,7 +53,7 @@ export default function ChatPage() {
   const [showInputPanel, setShowInputPanel] = useState(false);
   const [dynamicSuggestions, setDynamicSuggestions] = useState<string[]>([]);
   const [showSuggestions, setShowSuggestions] = useState(false);
-  const [suggestionTimeout, setSuggestionTimeout] = useState<NodeJS.Timeout | null>(null);
+  const suggestionTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const [sessionId, setSessionId] = useState<string | null>(null);
   const [messageStatus, setMessageStatus] = useState<'sending' | 'sent' | 'delivered' | null>(null);
   const [keyboardHeight, setKeyboardHeight] = useState(0);
@@ -61,66 +61,74 @@ export default function ChatPage() {
   const [voiceInputActive, setVoiceInputActive] = useState(false);
   const [voiceError, setVoiceError] = useState<string | null>(null);
   const [voiceErrorType, setVoiceErrorType] = useState<string | null>(null);
-  const [showVoiceInstructions, setShowVoiceInstructions] = useState(true);
   
   const chatContainerRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   
   // Flutter WebView-compatible voice recognition
-  const voice = useFlutterWebViewVoice({
-    onResult: (text, isFinal) => {
-      console.log('[Chat] Voice result:', { text, isFinal });
-      if (isFinal) {
-        // Add final transcript to input value
-        setInputValue(prev => {
-          const newValue = prev + (prev ? ' ' : '') + text;
-          console.log('[Chat] Updating input value:', newValue);
-          return newValue;
-        });
-        // Trigger haptic feedback in WebView
-        if (isWebView) {
-          triggerHaptic('light');
-        }
-      } else {
-        // Show interim results for visual feedback
-        console.log('[Chat] Interim transcript:', text);
-      }
-    },
-    onError: (error) => {
-      console.error('[Chat] Voice input error:', error);
-      setVoiceError(error);
-      setVoiceInputActive(false);
-      
-      // Show user-friendly error message
-      if (error.includes('permission') || error.includes('microphone')) {
-        toast({
-          title: "Microphone Access Required",
-          description: "Please allow microphone access in your browser or app settings.",
-          variant: "destructive"
-        });
-      }
-    },
-    onStart: () => {
-      console.log('[Chat] Voice input started');
-      setVoiceInputActive(true);
-      setVoiceError(null);
-      setVoiceErrorType(null);
+  // Memoize voice callbacks to prevent infinite loops
+  const handleVoiceResult = useCallback((text: string, isFinal: boolean) => {
+    debugLog('voice', '[Chat] Voice result:', { text, isFinal });
+    if (isFinal) {
+      // Add final transcript to input value
+      setInputValue(prev => {
+        const newValue = prev + (prev ? ' ' : '') + text;
+        debugLog('voice', '[Chat] Updating input value:', newValue);
+        return newValue;
+      });
+      // Trigger haptic feedback in WebView
       if (isWebView) {
-        triggerHaptic('medium');
+        triggerHaptic('light');
       }
-    },
-    onEnd: () => {
-      console.log('[Chat] Voice input ended');
-      setVoiceInputActive(false);
-    },
+    } else {
+      // Show interim results for visual feedback
+      debugLog('voice', '[Chat] Interim transcript:', text);
+    }
+  }, [isWebView, triggerHaptic]);
+
+  const handleVoiceError = useCallback((error: string) => {
+    debugLog('voice', '[Chat] Voice input error:', error);
+    setVoiceError(error);
+    setVoiceInputActive(false);
+    
+    // Show user-friendly error message
+    if (error.includes('permission') || error.includes('microphone')) {
+      toast({
+        title: "Microphone Access Required",
+        description: "Please allow microphone access in your browser or app settings.",
+        variant: "destructive"
+      });
+    }
+  }, [toast]);
+
+  const handleVoiceStart = useCallback(() => {
+    debugLog('voice', '[Chat] Voice input started');
+    setVoiceInputActive(true);
+    setVoiceError(null);
+    setVoiceErrorType(null);
+    if (isWebView) {
+      triggerHaptic('medium');
+    }
+  }, [isWebView, triggerHaptic]);
+
+  const handleVoiceEnd = useCallback(() => {
+    debugLog('voice', '[Chat] Voice input ended');
+    setVoiceInputActive(false);
+  }, []);
+
+  const voice = useFlutterWebViewVoice({
+    onResult: handleVoiceResult,
+    onError: handleVoiceError,
+    onStart: handleVoiceStart,
+    onEnd: handleVoiceEnd,
     autoRetry: true,
     maxRetries: 2
   });
   
   // Log voice support and WebView detection on mount
   useEffect(() => {
-    console.log('[Chat] Voice environment:', {
+    debugLog('voice', '[Chat] Voice environment:', {
       isWebView: voice.isWebView,
       webViewInfo: voice.webViewInfo,
       isSupported: voice.isSupported,
@@ -128,11 +136,6 @@ export default function ChatPage() {
       hasWebkitSpeechRecognition: 'webkitSpeechRecognition' in window,
       userAgent: navigator.userAgent
     });
-    
-    // Show instructions for WebView users on first visit
-    if (voice.isWebView && !voice.isSupported) {
-      setShowVoiceInstructions(true);
-    }
   }, [voice.isWebView, voice.webViewInfo, voice.isSupported]);
 
 
@@ -142,7 +145,7 @@ export default function ChatPage() {
   const extractSuggestions = (content: string): string[] => {
     // Input validation
     if (!content || typeof content !== 'string' || content.trim().length === 0) {
-      console.log('❌ Invalid content provided for extraction');
+      debugLog('chat', '❌ Invalid content provided for extraction');
       return [];
     }
     
@@ -298,11 +301,11 @@ export default function ChatPage() {
     return uniqueSuggestions.slice(0, 4);
   };
 
-  // Function to start suggestion timer
-  const startSuggestionTimer = () => {
+  // Function to start suggestion timer - memoized to prevent infinite loops
+  const startSuggestionTimer = useCallback(() => {
     // Clear any existing timeout
-    if (suggestionTimeout) {
-      clearTimeout(suggestionTimeout);
+    if (suggestionTimeoutRef.current) {
+      clearTimeout(suggestionTimeoutRef.current);
     }
     
     // Hide suggestions initially
@@ -312,30 +315,33 @@ export default function ChatPage() {
     // Set new timeout for 1-2 seconds (random for natural feel)
     const delay = Math.random() * 1000 + 1000; // 1-2 seconds
     const timeout = setTimeout(() => {
-      const lastMessage = messages[messages.length - 1];
-      if (lastMessage && lastMessage.role === 'assistant') {
-        const suggestions = extractSuggestions(lastMessage.content);
-        // Only show suggestions if we have meaningful ones
-        if (suggestions.length > 0) {
-          setDynamicSuggestions(suggestions);
-          setShowSuggestions(true);
-        } else {
-          setShowSuggestions(false);
-          setDynamicSuggestions([]);
+      setMessages(currentMessages => {
+        const lastMessage = currentMessages[currentMessages.length - 1];
+        if (lastMessage && lastMessage.role === 'assistant') {
+          const suggestions = extractSuggestions(lastMessage.content);
+          // Only show suggestions if we have meaningful ones
+          if (suggestions.length > 0) {
+            setDynamicSuggestions(suggestions);
+            setShowSuggestions(true);
+          } else {
+            setShowSuggestions(false);
+            setDynamicSuggestions([]);
+          }
         }
-      }
+        return currentMessages; // Return unchanged messages
+      });
     }, delay);
     
-    setSuggestionTimeout(timeout);
-  };
+    suggestionTimeoutRef.current = timeout;
+  }, []);
 
   // Function to handle user interaction (hide suggestions)
   const hideOnUserInteraction = () => {
     setShowSuggestions(false);
     setDynamicSuggestions([]);
-    if (suggestionTimeout) {
-      clearTimeout(suggestionTimeout);
-      setSuggestionTimeout(null);
+    if (suggestionTimeoutRef.current) {
+      clearTimeout(suggestionTimeoutRef.current);
+      suggestionTimeoutRef.current = null;
     }
   };
 
@@ -373,7 +379,7 @@ export default function ChatPage() {
       setSessionId(null);
       sessionStorage.removeItem('chatSessionId');
     } catch (error) {
-      console.warn('SessionStorage unavailable:', error);
+      debugLog('chat', 'SessionStorage unavailable:', error);
       // Continue without session storage - scenario will be null and chat will use fallback
     }
     
@@ -419,17 +425,15 @@ export default function ChatPage() {
 
   // Keyboard detection for input positioning (moved to state declarations above)
   
-  // Calculate dynamic input panel height for proper scrolling
-  const calculateInputPanelHeight = () => {
+  // Calculate dynamic input panel height for proper scrolling - memoized
+  const inputPanelHeight = useMemo(() => {
     const baseInputHeight = 88; // Input + padding + border
     const suggestionsHeight = (showSuggestions && dynamicSuggestions.length > 0) ? 60 : 0;
     const safeMargin = 20; // Buffer for comfortable scrolling
     const safeAreaBottom = 16; // Approximate safe area
     
     return baseInputHeight + suggestionsHeight + safeMargin + safeAreaBottom;
-  };
-  
-  const inputPanelHeight = calculateInputPanelHeight();
+  }, [showSuggestions, dynamicSuggestions.length]);
   
   useEffect(() => {
     // Primary: Visual Viewport API for accurate keyboard detection
@@ -444,7 +448,7 @@ export default function ChatPage() {
       // Set keyboard height for input positioning
       setKeyboardHeight(Math.max(0, heightDifference));
       
-      console.log('Viewport change for input:', { 
+      debugLog('webview', 'Viewport change for input:', { 
         windowHeight, 
         viewportHeight, 
         keyboardHeight: heightDifference,
@@ -474,7 +478,7 @@ export default function ChatPage() {
         
         setKeyboardHeight(estimatedKeyboardHeight);
         
-        console.log('Fallback keyboard detection:', { 
+        debugLog('webview', 'Fallback keyboard detection:', { 
           initialHeight, 
           currentHeight, 
           keyboardHeight: estimatedKeyboardHeight
@@ -505,7 +509,7 @@ export default function ChatPage() {
           behavior: 'smooth'
         });
         
-        console.log('Scroll to bottom triggered:', {
+        debugLog('chat', 'Scroll to bottom triggered:', {
           scrollHeight: container.scrollHeight,
           clientHeight: container.clientHeight,
           scrollTop: container.scrollTop,
@@ -534,7 +538,8 @@ export default function ChatPage() {
       const urlParams = new URLSearchParams(window.location.search);
       const userId = urlParams.get('user_id') || scenario?.webviewParams?.userId || 'test-web-user';
       
-      const response = await apiRequest("POST", "/api/chat/message", {
+      // apiRequest already returns parsed JSON and handles errors
+      const data = await apiRequest("POST", "/api/chat/message", {
         message,
         prompt: scenario?.prompt || "",
         sessionId: sessionId, // Will be null for first message, backend handles auto-creation
@@ -544,16 +549,7 @@ export default function ChatPage() {
         webviewParams: scenario?.webviewParams || null
       });
       
-      if (!response.ok) {
-        const errorData = await response.json();
-        const error = new Error(errorData.message || "AI service failed");
-        (error as any).retryable = errorData.retryable;
-        (error as any).status = response.status;
-        (error as any).errorData = errorData;
-        throw error;
-      }
-      
-      return response.json();
+      return data;
     },
     onSuccess: (data) => {
       setLastFailedMessage(null); // Clear failed message on success
@@ -565,7 +561,7 @@ export default function ChatPage() {
         try {
           sessionStorage.setItem('chatSessionId', data.sessionId);
         } catch (error) {
-          console.warn('Could not save session ID to sessionStorage:', error);
+          debugLog('chat', 'Could not save session ID to sessionStorage:', error);
           // Continue without session storage - session ID will be maintained in memory
         }
       }
@@ -573,8 +569,9 @@ export default function ChatPage() {
       // Clear any existing suggestions and hide them
       setDynamicSuggestions([]);
       setShowSuggestions(false);
-      if (suggestionTimeout) {
-        clearTimeout(suggestionTimeout);
+      if (suggestionTimeoutRef.current) {
+        clearTimeout(suggestionTimeoutRef.current);
+        suggestionTimeoutRef.current = null;
       }
       
       // Show typing indicator before assistant response
@@ -599,7 +596,7 @@ export default function ChatPage() {
       setLastFailedMessage(inputValue); // Store the failed message for retry
       setErrorDetails(error);
       
-      console.error("Chat message error:", error);
+      debugLog('chat', "Chat message error:", error);
       const isRetryable = error.retryable !== false;
       
       if (error.status === 503 || error.status === 502) {
@@ -681,7 +678,7 @@ export default function ChatPage() {
         }
       }
     }
-  }, [messages, isTyping, showInputPanel]);
+  }, [messages, isTyping, showInputPanel, startSuggestionTimer]);
 
   const handleSendMessage = async () => {
     if (!inputValue.trim() || !scenario) return;
@@ -787,34 +784,6 @@ export default function ChatPage() {
         </div>
       </div>
 
-      {/* WebView voice instructions */}
-      {voice.isWebView && showVoiceInstructions && (
-        <div className="px-4 py-2 bg-blue-50 border-b border-blue-200">
-          <div className="flex items-start space-x-2">
-            <Info className="h-4 w-4 text-blue-600 mt-0.5 flex-shrink-0" />
-            <div className="flex-1 text-xs">
-              <p className="text-blue-800">
-                {voice.webViewInfo?.platform === 'ios' 
-                  ? "Using iOS app. Voice input available - tap the mic button to start."
-                  : voice.webViewInfo?.platform === 'android'
-                  ? "Using Android app. Voice input available - tap the mic button to start."
-                  : "Using mobile app. Voice input may be limited."}
-              </p>
-              {!voice.isSupported && (
-                <p className="text-blue-700 mt-1">
-                  Tip: You can also use your device's voice keyboard.
-                </p>
-              )}
-            </div>
-            <button
-              onClick={() => setShowVoiceInstructions(false)}
-              className="text-blue-600 hover:text-blue-800 text-xs"
-            >
-              ✕
-            </button>
-          </div>
-        </div>
-      )}
 
       {/* Chat Messages - Scrollable area with dynamic bottom padding */}
       <div 
@@ -941,32 +910,11 @@ export default function ChatPage() {
           </div>
         )}
 
-        {/* Voice Compatibility Information */}
-        {voice.deviceInfo && voice.deviceInfo.browserSupport !== 'full' && (
-          <Card className="mb-3 p-3 bg-yellow-50 border-yellow-200">
-            <div className="flex items-start space-x-2">
-              <AlertTriangle className="h-4 w-4 text-yellow-600 mt-0.5" />
-              <div className="flex-1">
-                <p className="text-sm text-yellow-800">
-                  Voice input may have limited support on {voice.deviceInfo.browser}.
-                  {voice.deviceInfo.alternatives?.[0] && (
-                    <span className="block mt-1 text-xs">
-                      Tip: {voice.deviceInfo.alternatives[0]}
-                    </span>
-                  )}
-                </p>
-              </div>
-            </div>
-          </Card>
-        )}
-        
         <div className="flex items-center space-x-2">
-          {/* Voice Input Button with Contextual Tooltip */}
-          <Tooltip>
-            <TooltipTrigger asChild>
+          {/* Voice Input Button */}
               <Button
                 onClick={async () => {
-                  console.log('[Chat] Microphone button clicked:', { isListening: voice.isListening, isSupported: voice.isSupported });
+                  debugLog('voice', '[Chat] Microphone button clicked:', { isListening: voice.isListening, isSupported: voice.isSupported });
                   
                   if (!voice.isSupported) {
                     const message = voice.deviceInfo 
@@ -982,10 +930,10 @@ export default function ChatPage() {
                   }
                     
                   if (voice.isListening) {
-                    console.log('[Chat] Stopping voice input...');
+                    debugLog('voice', '[Chat] Stopping voice input...');
                     voice.stopListening();
                   } else {
-                    console.log('[Chat] Starting voice input...');
+                    debugLog('voice', '[Chat] Starting voice input...');
                     
                     // Don't request microphone permission separately in WebView to avoid crashes
                     // The speech recognition API will handle it
@@ -993,9 +941,9 @@ export default function ChatPage() {
                     // Start listening with error handling
                     try {
                       await voice.startListening();
-                      console.log('[Chat] Voice input started successfully');
+                      debugLog('voice', '[Chat] Voice input started successfully');
                     } catch (err) {
-                      console.error('[Chat] Failed to start voice input:', err);
+                      debugLog('voice', '[Chat] Failed to start voice input:', err);
                       toast({
                         title: "Voice Input Error",
                         description: "Could not start voice input. Please check microphone permissions.",
@@ -1040,129 +988,12 @@ export default function ChatPage() {
                 />
               )}
             </Button>
-            </TooltipTrigger>
-            <TooltipContent 
-              side="top" 
-              className={`max-w-xs ${
-                (!voice.isSupported && voiceErrorType) 
-                  ? 'bg-red-50 border-red-200 text-red-900'
-                  : 'bg-gray-50 border-gray-200 text-gray-900'
-              }`}
-            >
-              {(() => {
-                if (voice.isListening) {
-                  return (
-                    <div className="flex items-start space-x-2">
-                      <div className="h-4 w-4 mt-0.5 bg-red-500 rounded-full animate-pulse" />
-                      <div>
-                        <p className="font-medium text-sm">🎤 Recording Active</p>
-                        <p className="text-xs opacity-90 mt-1">Speak now. Click again to stop recording.</p>
-                      </div>
-                    </div>
-                  );
-                }
-                
-                if (voiceErrorType && (!voice.isSupported || voiceErrorType === 'language-not-supported')) {
-                  const getErrorContent = () => {
-                    switch (voiceErrorType) {
-                      case 'language-not-supported':
-                        const isEdge = /Edg\//.test(navigator.userAgent);
-                        const isMac = /Mac|iPhone|iPad|iPod/.test(navigator.userAgent);
-                        return {
-                          title: (isEdge && isMac) ? "Edge + macOS Compatibility Issue" : isEdge ? "Edge Browser Compatibility" : "Language Configuration Issue",
-                          description: (isEdge && isMac)
-                            ? "Voice input is not supported in Edge browser on macOS. Please use Chrome, Safari, or type your message instead."
-                            : isEdge 
-                              ? "Edge browser voice input issue. Try refreshing the page or use Chrome/Safari for voice input." 
-                              : "Speech recognition had a language error. Click the microphone button to try again, or type your message instead."
-                        };
-                      case 'not-allowed':
-                        return {
-                          title: "Microphone Permission Denied",
-                          description: "Please allow microphone access in your browser settings and refresh the page."
-                        };
-                      case 'audio-capture':
-                        return {
-                          title: "No Microphone Found",
-                          description: "Please check that your microphone is connected and working properly."
-                        };
-                      case 'network':
-                        return {
-                          title: "Network Error",
-                          description: "Voice recognition requires an internet connection. Please check your connection and try again."
-                        };
-                      case 'not-supported':
-                        const isEdgeOnMac = /Edg\//.test(navigator.userAgent) && /Mac|iPhone|iPad|iPod/.test(navigator.userAgent);
-                        return {
-                          title: isEdgeOnMac ? "Edge + macOS Not Supported" : "Voice Input Not Available",
-                          description: isEdgeOnMac 
-                            ? "Voice input is not supported in Edge browser on macOS. Please use Chrome, Safari, or type your message instead."
-                            : "Voice input works best on the deployed version of the app. Please type your message instead."
-                        };
-                      default:
-                        return {
-                          title: "Voice Input Error",
-                          description: voiceError || "Voice input encountered an error. Please try typing your message instead."
-                        };
-                    }
-                  };
-                  
-                  const errorContent = getErrorContent();
-                  return (
-                    <div className="flex items-start space-x-2">
-                      <AlertTriangle className="h-4 w-4 mt-0.5 text-red-500" />
-                      <div>
-                        <p className="font-medium text-sm">{errorContent.title}</p>
-                        <p className="text-xs opacity-90 mt-1">{errorContent.description}</p>
-                      </div>
-                    </div>
-                  );
-                }
-                
-                if (!voice.isSupported) {
-                  const deviceMessage = voice.deviceInfo 
-                    ? `Not supported on ${voice.deviceInfo.browser} (${voice.deviceInfo.operatingSystem})`
-                    : "Speech recognition not supported in this environment";
-                  
-                  return (
-                    <div className="flex items-start space-x-2">
-                      <Info className="h-4 w-4 mt-0.5 text-gray-500" />
-                      <div>
-                        <p className="font-medium text-sm">Voice Input Not Available</p>
-                        <p className="text-xs opacity-90 mt-1">{deviceMessage}</p>
-                        {voice.deviceInfo?.alternatives[0] && (
-                          <p className="text-xs opacity-75 mt-1 text-green-600">💡 {voice.deviceInfo.alternatives[0]}</p>
-                        )}
-                      </div>
-                    </div>
-                  );
-                }
-                
-                const compatibilityMessage = voice.deviceInfo 
-                  ? voice.deviceInfo.browserSupport === 'partial'
-                    ? `Limited support on ${voice.deviceInfo.browser}. May have occasional issues.`
-                    : `Full support on ${voice.deviceInfo.browser}. Click to start recording.`
-                  : "Click to start recording. Speak clearly for best results.";
-                
-                return (
-                  <div className="flex items-start space-x-2">
-                    <Mic className={`h-4 w-4 mt-0.5 ${
-                      voice.deviceInfo?.browserSupport === 'partial' ? 'text-yellow-600' : 'text-blue-500'
-                    }`} />
-                    <div>
-                      <p className="font-medium text-sm">🎤 Voice Input (Click to Start)</p>
-                      <p className="text-xs opacity-90 mt-1">{compatibilityMessage}</p>
-                      <p className="text-xs opacity-75 mt-1">Click once to start → Speak → Click again to stop.</p>
-                    </div>
-                  </div>
-                );
-              })()}
-            </TooltipContent>
-          </Tooltip>
           
           <div className="flex-1 relative">
             <Input
               ref={inputRef}
+              id="chat-message-input"
+              name="message"
               type="text"
               placeholder={voice.isListening ? "Listening..." : "Type something"}
               value={inputValue + (voice.isListening && voice.interimTranscript ? ' ' + voice.interimTranscript : '')}
@@ -1183,7 +1014,7 @@ export default function ChatPage() {
                       top: container.scrollHeight,
                       behavior: 'smooth'
                     });
-                    console.log('Input focus scroll:', { 
+                    debugLog('chat', 'Input focus scroll:', { 
                       scrollHeight: container.scrollHeight,
                       inputPanelHeight: inputPanelHeight 
                     });
@@ -1200,6 +1031,7 @@ export default function ChatPage() {
               autoComplete="off"
               inputMode="text"
               enterKeyHint="send"
+              aria-label="Chat message input"
             />
             {/* Voice recording indicator */}
             {voice.isListening && (

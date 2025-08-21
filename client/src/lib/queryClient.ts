@@ -11,8 +11,10 @@ export const queryClient = new QueryClient({
 });
 
 // Helper function for API requests
-export async function apiRequest(endpoint: string, options?: RequestInit) {
+export async function apiRequest(method: string, endpoint: string, body?: any, options?: RequestInit) {
   const response = await fetch(endpoint, {
+    method,
+    body: body ? JSON.stringify(body) : undefined,
     ...options,
     headers: {
       "Content-Type": "application/json",
