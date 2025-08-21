@@ -94,7 +94,7 @@ export default function ChatPage() {
     setVoiceInputActive(false);
     
     // Handle permission errors more gracefully in WebView
-    if ((error === 'permission' || error.includes('not-allowed')) && voice.isWebView) {
+    if ((error === 'permission' || error.includes('not-allowed')) && isWebView) {
       // For WebView with permission issues, show a helpful message
       debugLog('voice', '[Chat] Microphone permission issue in WebView');
       toast({
@@ -107,7 +107,7 @@ export default function ChatPage() {
       setVoiceInputActive(false);
     } else if (error.includes('permission') || error.includes('microphone')) {
       // Only show toast for non-WebView or after permission was explicitly denied
-      if (!voice.isWebView) {
+      if (!isWebView) {
         toast({
           title: "Microphone Access Required",
           description: "Please allow microphone access in your browser settings.",
@@ -115,7 +115,7 @@ export default function ChatPage() {
         });
       }
     }
-  }, [toast, voice.isWebView]);
+  }, [toast, isWebView]);
 
   const handleVoiceStart = useCallback(() => {
     debugLog('voice', '[Chat] Voice input started');
