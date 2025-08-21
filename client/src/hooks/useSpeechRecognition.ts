@@ -439,8 +439,22 @@ export function useSpeechRecognition({
     }
     
     try {
-      // Simplified permission check - let speech recognition handle its own permissions
-      debugLog('voice', '[Speech] Starting speech recognition without explicit permission check');
+      // Check if we're in a WebView that might not have permissions configured
+      const isWebView = window.webkit?.messageHandlers || window.FlutterChannel || window.ReactNativeWebView;
+      
+      // Try to request permissions if available
+      if (navigator.mediaDevices && navigator.mediaDevices.getUserMedia && !isWebView) {
+        try {
+          debugLog('voice', '[Speech] Requesting microphone permission');
+          await navigator.mediaDevices.getUserMedia({ audio: true });
+          debugLog('voice', '[Speech] Microphone permission granted');
+        } catch (err) {
+          debugLog('voice', '[Speech] Microphone permission denied:', err);
+          // Continue anyway - let speech recognition API handle it
+        }
+      } else {
+        debugLog('voice', '[Speech] Starting speech recognition without explicit permission check (WebView or no getUserMedia)');
+      }
       
       setTranscript('');
       setInterimTranscript('');
@@ -467,7 +481,7 @@ export function useSpeechRecognition({
           throw startError;
         }
       }
-    } catch (error) {
+    } catch (error: any) {
       console.error('[Speech] Error starting recognition:', error);
       setIsListening(false);
       isListeningRef.current = false;

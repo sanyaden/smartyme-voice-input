@@ -61,6 +61,7 @@ export default function ChatPage() {
   const [voiceInputActive, setVoiceInputActive] = useState(false);
   const [voiceError, setVoiceError] = useState<string | null>(null);
   const [voiceErrorType, setVoiceErrorType] = useState<string | null>(null);
+  const [voiceDisabledForSession, setVoiceDisabledForSession] = useState(false);
   
   const chatContainerRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
@@ -93,10 +94,17 @@ export default function ChatPage() {
     setVoiceInputActive(false);
     
     // Handle permission errors more gracefully in WebView
-    if (error === 'permission' && voice.isWebView) {
-      // For WebView, just log it - the app should handle permission request
-      debugLog('voice', '[Chat] Microphone permission needed in WebView, app should handle');
-      // Don't show toast - the Flutter app will handle permissions
+    if ((error === 'permission' || error.includes('not-allowed')) && voice.isWebView) {
+      // For WebView with permission issues, show a helpful message
+      debugLog('voice', '[Chat] Microphone permission issue in WebView');
+      toast({
+        title: "Voice Input Unavailable",
+        description: "Please type your message instead. Voice input requires app permissions.",
+        variant: "default"
+      });
+      // Disable voice input for this session to avoid repeated errors
+      setVoiceDisabledForSession(true);
+      setVoiceInputActive(false);
     } else if (error.includes('permission') || error.includes('microphone')) {
       // Only show toast for non-WebView or after permission was explicitly denied
       if (!voice.isWebView) {
@@ -919,11 +927,12 @@ export default function ChatPage() {
 
         <div className="flex items-center space-x-2">
           {/* Voice Input Button */}
+              {!voiceDisabledForSession && (
               <Button
                 onClick={async () => {
                   debugLog('voice', '[Chat] Microphone button clicked:', { isListening: voice.isListening, isSupported: voice.isSupported });
                   
-                  if (!voice.isSupported) {
+                  if (!voice.isSupported || voiceDisabledForSession) {
                     const message = voice.deviceInfo 
                       ? `Voice input is not available on ${voice.deviceInfo.browser} for ${voice.deviceInfo.operatingSystem}. ${voice.deviceInfo.alternatives[0] || 'Please try a different browser.'}`
                       : "Speech recognition is not supported in this browser environment. Try using Chrome, Edge, or Safari on the deployed version of the app.";
@@ -1001,6 +1010,7 @@ export default function ChatPage() {
                 />
               )}
             </Button>
+            )}
           
           <div className="flex-1 relative">
             <Input
