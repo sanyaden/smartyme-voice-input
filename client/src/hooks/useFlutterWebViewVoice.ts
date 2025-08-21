@@ -202,8 +202,11 @@ export function useFlutterWebViewVoice({
       await speechRecognition.startListening();
     } catch (error) {
       debugLog('voice', '[FlutterWebViewVoice] Failed to start:', error);
-      if (isWebView) {
-        onError?.('Voice input failed to start. Please ensure microphone permissions are granted in your device settings.');
+      // Don't propagate permission errors in WebView - let the app handle them
+      if (!isWebView || !String(error).includes('permission')) {
+        if (isWebView) {
+          onError?.('Voice input failed to start. Please ensure microphone permissions are granted in your device settings.');
+        }
       }
     }
   }, [isWebView, webViewInfo, speechRecognition, onError]);

@@ -316,7 +316,14 @@ export function useSpeechRecognition({
             errorMessage = 'Network error. Please check your connection.';
             break;
           case 'not-allowed':
-            errorMessage = 'Microphone access denied. Please allow microphone access in your browser settings.';
+            // In WebView, permissions might need to be granted at the app level
+            const isWebView = window.webkit?.messageHandlers || window.FlutterChannel || window.ReactNativeWebView;
+            if (isWebView) {
+              errorMessage = 'permission';
+              debugLog('voice', '[Speech] Microphone permission needed in WebView');
+            } else {
+              errorMessage = 'Microphone access denied. Please allow microphone access in your browser settings.';
+            }
             break;
           case 'aborted':
             // Don't show error for aborted - this is usually intentional

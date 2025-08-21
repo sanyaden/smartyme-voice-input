@@ -92,15 +92,22 @@ export default function ChatPage() {
     setVoiceError(error);
     setVoiceInputActive(false);
     
-    // Show user-friendly error message
-    if (error.includes('permission') || error.includes('microphone')) {
-      toast({
-        title: "Microphone Access Required",
-        description: "Please allow microphone access in your browser or app settings.",
-        variant: "destructive"
-      });
+    // Handle permission errors more gracefully in WebView
+    if (error === 'permission' && voice.isWebView) {
+      // For WebView, just log it - the app should handle permission request
+      debugLog('voice', '[Chat] Microphone permission needed in WebView, app should handle');
+      // Don't show toast - the Flutter app will handle permissions
+    } else if (error.includes('permission') || error.includes('microphone')) {
+      // Only show toast for non-WebView or after permission was explicitly denied
+      if (!voice.isWebView) {
+        toast({
+          title: "Microphone Access Required",
+          description: "Please allow microphone access in your browser settings.",
+          variant: "destructive"
+        });
+      }
     }
-  }, [toast]);
+  }, [toast, voice.isWebView]);
 
   const handleVoiceStart = useCallback(() => {
     debugLog('voice', '[Chat] Voice input started');
@@ -944,11 +951,17 @@ export default function ChatPage() {
                       debugLog('voice', '[Chat] Voice input started successfully');
                     } catch (err) {
                       debugLog('voice', '[Chat] Failed to start voice input:', err);
-                      toast({
-                        title: "Voice Input Error",
-                        description: "Could not start voice input. Please check microphone permissions.",
-                        variant: "destructive"
-                      });
+                      // More graceful handling for WebView permission errors
+                      const errorStr = String(err);
+                      if (!voice.isWebView || (!errorStr.includes('permission') && !errorStr.includes('not-allowed'))) {
+                        toast({
+                          title: "Voice Input Error",
+                          description: voice.isWebView 
+                            ? "Please ensure microphone permissions are enabled in your app settings."
+                            : "Could not start voice input. Please check microphone permissions.",
+                          variant: "destructive"
+                        });
+                      }
                     }
                   }
                 }}
