@@ -1,0 +1,1 @@
+// This is a backup of the working storage.ts before the TypeScript syntax got corrupted
