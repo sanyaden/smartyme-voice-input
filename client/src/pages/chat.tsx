@@ -955,7 +955,7 @@ export default function ChatPage() {
             <TooltipTrigger asChild>
               <Button
                 onClick={async () => {
-                  console.log('[Chat] Microphone button clicked:', { voice.isListening: voice.voice.isListening, isSupported: voice.isSupported });
+                  console.log('[Chat] Microphone button clicked:', { isListening: voice.isListening, isSupported: voice.isSupported });
                   
                   if (!voice.isSupported) {
                     const message = voice.deviceInfo 
