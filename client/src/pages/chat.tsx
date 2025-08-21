@@ -15,8 +15,8 @@ import { mrSmartImage } from "@/lib/assets";
 import { useWebView } from "@/contexts/WebViewContext";
 import { useWebViewNavigation } from "@/hooks/useWebViewNavigation";
 import { getWebViewParams } from "@/contexts/WebViewContext";
-import { useSpeechRecognition, DeviceCompatibilityInfo } from "@/hooks/useSpeechRecognition";
-import { VoiceCompatibilityFallback } from "@/components/voice-compatibility-fallback";
+import { useFlutterWebViewVoice } from "@/hooks/useFlutterWebViewVoice";
+import { FlutterWebViewVoiceInput } from "@/components/flutter-webview-voice-input";
 
 interface ChatMessage {
   role: "user" | "assistant";
@@ -61,23 +61,14 @@ export default function ChatPage() {
   const [voiceInputActive, setVoiceInputActive] = useState(false);
   const [voiceError, setVoiceError] = useState<string | null>(null);
   const [voiceErrorType, setVoiceErrorType] = useState<string | null>(null);
-  const [deviceCompatibility, setDeviceCompatibility] = useState<DeviceCompatibilityInfo | null>(null);
+  const [showVoiceInstructions, setShowVoiceInstructions] = useState(true);
   
   const chatContainerRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   
-  // Speech recognition setup
-  const {
-    isListening,
-    isSupported: isSpeechSupported,
-    transcript,
-    interimTranscript,
-    deviceInfo,
-    startListening,
-    stopListening,
-    resetTranscript
-  } = useSpeechRecognition({
+  // Flutter WebView-compatible voice recognition
+  const voice = useFlutterWebViewVoice({
     onResult: (text, isFinal) => {
       console.log('[Chat] Voice result:', { text, isFinal });
       if (isFinal) {
@@ -92,28 +83,23 @@ export default function ChatPage() {
           triggerHaptic('light');
         }
       } else {
-        // Show interim results
+        // Show interim results for visual feedback
         console.log('[Chat] Interim transcript:', text);
       }
     },
-    onError: (error, errorType) => {
+    onError: (error) => {
       console.error('[Chat] Voice input error:', error);
       setVoiceError(error);
-      setVoiceErrorType(errorType || 'unknown');
       setVoiceInputActive(false);
       
-      // Only show toast for critical errors, tooltip will handle others
-      if (errorType === 'not-allowed' || errorType === 'audio-capture') {
+      // Show user-friendly error message
+      if (error.includes('permission') || error.includes('microphone')) {
         toast({
-          title: "Voice Input Error",
-          description: error,
+          title: "Microphone Access Required",
+          description: "Please allow microphone access in your browser or app settings.",
           variant: "destructive"
         });
       }
-    },
-    onCompatibilityCheck: (isSupported, deviceInfo) => {
-      console.log('[Chat] Device compatibility check:', { isSupported, deviceInfo });
-      setDeviceCompatibility(deviceInfo);
     },
     onStart: () => {
       console.log('[Chat] Voice input started');
@@ -128,20 +114,26 @@ export default function ChatPage() {
       console.log('[Chat] Voice input ended');
       setVoiceInputActive(false);
     },
-    // Don't specify language - let browser use default to avoid errors
-    continuous: false,
-    interimResults: true
+    autoRetry: true,
+    maxRetries: 2
   });
   
-  // Log speech recognition support on mount
+  // Log voice support and WebView detection on mount
   useEffect(() => {
-    console.log('[Chat] Speech recognition support:', {
-      isSupported: isSpeechSupported,
+    console.log('[Chat] Voice environment:', {
+      isWebView: voice.isWebView,
+      webViewInfo: voice.webViewInfo,
+      isSupported: voice.isSupported,
       hasSpeechRecognition: 'SpeechRecognition' in window,
       hasWebkitSpeechRecognition: 'webkitSpeechRecognition' in window,
       userAgent: navigator.userAgent
     });
-  }, [isSpeechSupported]);
+    
+    // Show instructions for WebView users on first visit
+    if (voice.isWebView && !voice.isSupported) {
+      setShowVoiceInstructions(true);
+    }
+  }, [voice.isWebView, voice.webViewInfo, voice.isSupported]);
 
 
 
@@ -795,6 +787,35 @@ export default function ChatPage() {
         </div>
       </div>
 
+      {/* WebView voice instructions */}
+      {voice.isWebView && showVoiceInstructions && (
+        <div className="px-4 py-2 bg-blue-50 border-b border-blue-200">
+          <div className="flex items-start space-x-2">
+            <Info className="h-4 w-4 text-blue-600 mt-0.5 flex-shrink-0" />
+            <div className="flex-1 text-xs">
+              <p className="text-blue-800">
+                {voice.webViewInfo?.platform === 'ios' 
+                  ? "Using iOS app. Voice input available - tap the mic button to start."
+                  : voice.webViewInfo?.platform === 'android'
+                  ? "Using Android app. Voice input available - tap the mic button to start."
+                  : "Using mobile app. Voice input may be limited."}
+              </p>
+              {!voice.isSupported && (
+                <p className="text-blue-700 mt-1">
+                  Tip: You can also use your device's voice keyboard.
+                </p>
+              )}
+            </div>
+            <button
+              onClick={() => setShowVoiceInstructions(false)}
+              className="text-blue-600 hover:text-blue-800 text-xs"
+            >
+              ✕
+            </button>
+          </div>
+        </div>
+      )}
+
       {/* Chat Messages - Scrollable area with dynamic bottom padding */}
       <div 
         ref={chatContainerRef}
@@ -921,9 +942,9 @@ export default function ChatPage() {
         )}
 
         {/* Voice Compatibility Information */}
-        {deviceCompatibility && deviceCompatibility.browserSupport !== 'full' && (
+        {voice.deviceInfo && voice.deviceInfo.browserSupport !== 'full' && (
           <VoiceCompatibilityFallback 
-            deviceInfo={deviceCompatibility}
+            deviceInfo={voice.deviceInfo}
             onDismiss={() => setDeviceCompatibility(null)}
           />
         )}
@@ -934,11 +955,11 @@ export default function ChatPage() {
             <TooltipTrigger asChild>
               <Button
                 onClick={async () => {
-                  console.log('[Chat] Microphone button clicked:', { isListening, isSpeechSupported });
+                  console.log('[Chat] Microphone button clicked:', { voice.isListening: voice.voice.isListening, isSupported: voice.isSupported });
                   
-                  if (!isSpeechSupported) {
-                    const message = deviceCompatibility 
-                      ? `Voice input is not available on ${deviceCompatibility.browser} for ${deviceCompatibility.operatingSystem}. ${deviceCompatibility.alternatives[0] || 'Please try a different browser.'}`
+                  if (!voice.isSupported) {
+                    const message = voice.deviceInfo 
+                      ? `Voice input is not available on ${voice.deviceInfo.browser} for ${voice.deviceInfo.operatingSystem}. ${voice.deviceInfo.alternatives[0] || 'Please try a different browser.'}`
                       : "Speech recognition is not supported in this browser environment. Try using Chrome, Edge, or Safari on the deployed version of the app.";
                     
                     toast({
@@ -949,9 +970,9 @@ export default function ChatPage() {
                     return;
                   }
                     
-                  if (isListening) {
+                  if (voice.isListening) {
                     console.log('[Chat] Stopping voice input...');
-                    stopListening();
+                    voice.stopListening();
                   } else {
                     console.log('[Chat] Starting voice input...');
                     
@@ -960,7 +981,7 @@ export default function ChatPage() {
                     
                     // Start listening with error handling
                     try {
-                      await startListening();
+                      await voice.startListening();
                       console.log('[Chat] Voice input started successfully');
                     } catch (err) {
                       console.error('[Chat] Failed to start voice input:', err);
@@ -973,13 +994,13 @@ export default function ChatPage() {
                   }
                 }}
                 className={`rounded-xl transition-all ${
-                !isSpeechSupported
+                !voice.isSupported
                   ? 'bg-gray-300 hover:bg-gray-400 cursor-not-allowed'
-                  : deviceCompatibility?.browserSupport === 'partial'
-                    ? isListening 
+                  : voice.deviceInfo?.browserSupport === 'partial'
+                    ? voice.isListening 
                       ? 'bg-yellow-500 hover:bg-yellow-600 mic-recording' 
                       : 'bg-yellow-100 hover:bg-yellow-200 border border-yellow-300'
-                    : isListening 
+                    : voice.isListening 
                       ? 'bg-red-500 hover:bg-red-600 mic-recording' 
                       : 'bg-gray-100 hover:bg-gray-200'
               }`}
@@ -990,13 +1011,13 @@ export default function ChatPage() {
                 display: 'flex',
                 alignItems: 'center',
                 justifyContent: 'center',
-                opacity: !isSpeechSupported ? 0.6 : 1
+                opacity: !voice.isSupported ? 0.6 : 1
               }}
               disabled={sendMessageMutation.isPending}
               type="button"
-              title={!isSpeechSupported ? 'Voice input not available in this environment' : 'Voice input'}
+              title={!voice.isSupported ? 'Voice input not available in this environment' : 'Voice input'}
             >
-              {isListening ? (
+              {voice.isListening ? (
                 <MicOff 
                   className="h-5 w-5" 
                   style={{ color: '#FFFFFF' }}
@@ -1004,7 +1025,7 @@ export default function ChatPage() {
               ) : (
                 <Mic 
                   className="h-5 w-5" 
-                  style={{ color: !isSpeechSupported ? '#6B7280' : '#1B1B1B' }}
+                  style={{ color: !voice.isSupported ? '#6B7280' : '#1B1B1B' }}
                 />
               )}
             </Button>
@@ -1012,13 +1033,13 @@ export default function ChatPage() {
             <TooltipContent 
               side="top" 
               className={`max-w-xs ${
-                (!isSpeechSupported && voiceErrorType) 
+                (!voice.isSupported && voiceErrorType) 
                   ? 'bg-red-50 border-red-200 text-red-900'
                   : 'bg-gray-50 border-gray-200 text-gray-900'
               }`}
             >
               {(() => {
-                if (isListening) {
+                if (voice.isListening) {
                   return (
                     <div className="flex items-start space-x-2">
                       <div className="h-4 w-4 mt-0.5 bg-red-500 rounded-full animate-pulse" />
@@ -1030,7 +1051,7 @@ export default function ChatPage() {
                   );
                 }
                 
-                if (voiceErrorType && (!isSpeechSupported || voiceErrorType === 'language-not-supported')) {
+                if (voiceErrorType && (!voice.isSupported || voiceErrorType === 'language-not-supported')) {
                   const getErrorContent = () => {
                     switch (voiceErrorType) {
                       case 'language-not-supported':
@@ -1087,9 +1108,9 @@ export default function ChatPage() {
                   );
                 }
                 
-                if (!isSpeechSupported) {
-                  const deviceMessage = deviceCompatibility 
-                    ? `Not supported on ${deviceCompatibility.browser} (${deviceCompatibility.operatingSystem})`
+                if (!voice.isSupported) {
+                  const deviceMessage = voice.deviceInfo 
+                    ? `Not supported on ${voice.deviceInfo.browser} (${voice.deviceInfo.operatingSystem})`
                     : "Speech recognition not supported in this environment";
                   
                   return (
@@ -1098,24 +1119,24 @@ export default function ChatPage() {
                       <div>
                         <p className="font-medium text-sm">Voice Input Not Available</p>
                         <p className="text-xs opacity-90 mt-1">{deviceMessage}</p>
-                        {deviceCompatibility?.alternatives[0] && (
-                          <p className="text-xs opacity-75 mt-1 text-green-600">💡 {deviceCompatibility.alternatives[0]}</p>
+                        {voice.deviceInfo?.alternatives[0] && (
+                          <p className="text-xs opacity-75 mt-1 text-green-600">💡 {voice.deviceInfo.alternatives[0]}</p>
                         )}
                       </div>
                     </div>
                   );
                 }
                 
-                const compatibilityMessage = deviceCompatibility 
-                  ? deviceCompatibility.browserSupport === 'partial'
-                    ? `Limited support on ${deviceCompatibility.browser}. May have occasional issues.`
-                    : `Full support on ${deviceCompatibility.browser}. Click to start recording.`
+                const compatibilityMessage = voice.deviceInfo 
+                  ? voice.deviceInfo.browserSupport === 'partial'
+                    ? `Limited support on ${voice.deviceInfo.browser}. May have occasional issues.`
+                    : `Full support on ${voice.deviceInfo.browser}. Click to start recording.`
                   : "Click to start recording. Speak clearly for best results.";
                 
                 return (
                   <div className="flex items-start space-x-2">
                     <Mic className={`h-4 w-4 mt-0.5 ${
-                      deviceCompatibility?.browserSupport === 'partial' ? 'text-yellow-600' : 'text-blue-500'
+                      voice.deviceInfo?.browserSupport === 'partial' ? 'text-yellow-600' : 'text-blue-500'
                     }`} />
                     <div>
                       <p className="font-medium text-sm">🎤 Voice Input (Click to Start)</p>
@@ -1132,8 +1153,8 @@ export default function ChatPage() {
             <Input
               ref={inputRef}
               type="text"
-              placeholder={isListening ? "Listening..." : "Type something"}
-              value={inputValue + (isListening && interimTranscript ? ' ' + interimTranscript : '')}
+              placeholder={voice.isListening ? "Listening..." : "Type something"}
+              value={inputValue + (voice.isListening && voice.interimTranscript ? ' ' + voice.interimTranscript : '')}
               onChange={(e) => {
                 setInputValue(e.target.value);
                 // Hide suggestions when user starts typing
@@ -1159,18 +1180,18 @@ export default function ChatPage() {
                 }, 300); // Longer delay for keyboard animation
               }}
               className={`w-full px-4 bg-gray-100 rounded-2xl border-2 transition-all ${
-                isListening 
+                voice.isListening 
                   ? 'border-red-400 bg-red-50' 
                   : 'border-transparent focus:border-primary'
               }`}
               style={{ height: '56px' }}
-              disabled={sendMessageMutation.isPending || isListening}
+              disabled={sendMessageMutation.isPending || voice.isListening}
               autoComplete="off"
               inputMode="text"
               enterKeyHint="send"
             />
             {/* Voice recording indicator */}
-            {isListening && (
+            {voice.isListening && (
               <div className="absolute right-3 top-1/2 transform -translate-y-1/2">
                 <div className="flex space-x-1">
                   <span className="block w-1 h-4 bg-red-500 rounded-full animate-pulse"></span>
