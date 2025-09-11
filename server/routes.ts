@@ -1,12 +1,18 @@
 import type { Express } from "express";
 import { createServer, type Server } from "http";
+import { WebSocketServer } from "ws";
 import { storage } from "./storage";
 import { insertUserSchema, insertChatSessionSchema, insertChatMessageSchema, insertConversationFeedbackSchema } from "@shared/schema";
 import OpenAI from "openai";
+import { handleRealtimeWebSocket, closeAllSessions } from "./openai-realtime";
 import fs from "fs";
 import path from "path";
 import { fileURLToPath } from "url";
 import { resolveLessonId, detectLessonIdFormat, mapLongIdToShortId } from "./lesson-mapping";
+import { ElevenLabsClient } from "@elevenlabs/elevenlabs-js";
+import axios from "axios";
+import gptRealtimeRoutes, { setupGPTRealtimeWebSocket } from "./gpt-realtime-routes";
+import { gptRealtimeService } from "./gpt-realtime-service";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -45,6 +51,11 @@ if (!courseData) {
 const openai = new OpenAI({ 
   apiKey: process.env.OPENAI_API_KEY,
   timeout: 30000, // 30 second timeout for all requests
+});
+
+// Initialize ElevenLabs client for high-quality TTS
+const elevenlabs = new ElevenLabsClient({
+  apiKey: process.env.ELEVENLABS_API_KEY
 });
 
 // Retry logic with exponential backoff
@@ -107,6 +118,58 @@ function requireAdminSession(req: any, res: any, next: any) {
 }
 
 export async function registerRoutes(app: Express): Promise<Server> {
+  console.log('🎯 registerRoutes called - setting up all routes');
+  
+  // Security middleware for Flutter app
+  const FLUTTER_APP_KEY = process.env.FLUTTER_APP_KEY || 'flutter-app-secure-key';
+
+  const authenticateFlutterApp = (req: any, res: any, next: any) => {
+    console.log('🚀 authenticateFlutterApp middleware called for:', req.method, req.path);
+    const apiKey = req.headers['x-api-key'];
+    
+    // Allow WebView requests (Flutter WebView calls from web interface)
+    const isWebViewRequest = req.headers.referer?.includes('source=flutter_app') || 
+                             req.body?.webviewParams || 
+                             req.query?.source === 'flutter_app' ||
+                             req.headers.referer?.includes('192.168.31.113:3000') || // Local dev requests
+                             req.body?.entryPoint === 'flutter_webview'; // Check for Flutter WebView entry point
+    
+    // Always log authentication attempts for debugging
+    console.log('🔐 Authentication check for', req.method, req.path, ':', {
+      apiKey: apiKey ? 'present' : 'missing',
+      referer: req.headers.referer,
+      webviewParamsPresent: !!req.body?.webviewParams,
+      webviewParams: req.body?.webviewParams,
+      entryPoint: req.body?.entryPoint,
+      querySource: req.query?.source,
+      bodyKeys: Object.keys(req.body || {}),
+      isWebViewRequest,
+      decision: isWebViewRequest || apiKey === FLUTTER_APP_KEY ? 'ALLOW' : 'DENY'
+    });
+    
+    if (isWebViewRequest || apiKey === FLUTTER_APP_KEY) {
+      next();
+    } else {
+      console.log('❌ Access denied for:', req.method, req.path);
+      return res.status(401).json({ error: 'Unauthorized' });
+    }
+  };
+
+  // Test route to verify routes are working
+  app.get('/api/test', (req, res) => {
+    console.log('🧪 Test route hit!');
+    res.json({ message: 'Test route works!' });
+  });
+
+  // Apply security to API endpoints (except admin)
+  app.use('/api/users', authenticateFlutterApp);
+  // Temporarily disable /api/chat authentication for debugging
+  // app.use('/api/chat', authenticateFlutterApp);
+  app.use('/api/tts', authenticateFlutterApp);
+  
+  // GPT Realtime API routes
+  app.use('/api', gptRealtimeRoutes);
+
   // Admin login endpoint
   app.post("/api/admin/login", adminAuth, async (req, res) => {
     res.json({ message: "Login successful", token: process.env.ADMIN_PASSWORD });
@@ -261,6 +324,14 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.post("/api/chat/message", async (req, res) => {
     try {
       const { message, sessionId, prompt, scenario, userId, entryPoint, webviewParams } = req.body;
+
+      // Authentication temporarily disabled for debugging
+      console.log('💬 Chat message received:', {
+        userId,
+        entryPoint,
+        webviewParamsPresent: !!webviewParams,
+        referer: req.headers.referer
+      });
 
       if (!message) {
         return res.status(400).json({ message: "Message is required" });
@@ -598,6 +669,577 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  // ElevenLabs TTS endpoint for high-quality voice synthesis
+  app.post("/api/tts", async (req, res) => {
+    try {
+      const { text, optimize_streaming_latency, output_format } = req.body;
+
+      if (!text) {
+        return res.status(400).json({ message: "Text is required" });
+      }
+
+      if (!process.env.ELEVENLABS_API_KEY) {
+        console.error("❌ ElevenLabs API key not found");
+        return res.status(503).json({ message: "TTS service unavailable - API key not configured" });
+      }
+
+      console.log("🗣️ Generating ElevenLabs TTS for text:", text.substring(0, 100) + "...");
+
+      try {
+        // Generate speech using ElevenLabs with optimization support - George (British Professor voice)
+        const audio = await elevenlabs.textToSpeech.convert("JBFqnCBsd6RMkjVDRZzb", {
+          text: text,
+          modelId: optimize_streaming_latency ? "eleven_turbo_v2" : "eleven_multilingual_v2", // Use faster turbo model if requested
+          outputFormat: output_format || "mp3_44100_128", // Support custom output format for speed
+          voice_settings: {
+            stability: optimize_streaming_latency ? 0.4 : 0.5, // Slightly less stable but faster
+            similarity_boost: optimize_streaming_latency ? 0.7 : 0.8, // Reduced for speed
+            style: 0.2,
+            use_speaker_boost: !optimize_streaming_latency // Disable for faster processing
+          }
+        });
+
+        console.log("✅ ElevenLabs API call successful");
+
+        // Convert the audio stream to buffer
+        const chunks: Buffer[] = [];
+        for await (const chunk of audio) {
+          chunks.push(chunk);
+        }
+        const audioBuffer = Buffer.concat(chunks);
+
+        console.log(`📊 Generated audio buffer: ${audioBuffer.length} bytes`);
+
+        // Set appropriate headers for audio response
+        res.set({
+          'Content-Type': 'audio/mpeg',
+          'Content-Length': audioBuffer.length.toString(),
+          'Cache-Control': 'public, max-age=3600' // Cache for 1 hour
+        });
+
+        res.send(audioBuffer);
+
+      } catch (elevenLabsError: any) {
+        console.error("❌ ElevenLabs API error:", elevenLabsError);
+        if (elevenLabsError.body?.detail) {
+          console.error("📊 Quota details:", elevenLabsError.body.detail);
+        }
+        throw elevenLabsError;
+      }
+
+    } catch (error: any) {
+      console.error("ElevenLabs TTS error:", error);
+      
+      let errorMessage = "TTS service is temporarily unavailable. Please try again.";
+      let statusCode = 500;
+      
+      if (error.status === 401) {
+        errorMessage = "TTS service authentication failed.";
+        statusCode = 502;
+      } else if (error.status === 429) {
+        errorMessage = "TTS service rate limit exceeded. Please try again later.";
+        statusCode = 429;
+      }
+      
+      res.status(statusCode).json({ 
+        message: errorMessage,
+        error: error.message
+      });
+    }
+  });
+
+  // Real-time streaming chat endpoint with Server-Sent Events
+  app.post("/api/chat/stream", async (req, res) => {
+    const { sessionId, message, userId, isVoiceInput = false } = req.body;
+
+    // Set SSE headers
+    res.setHeader('Content-Type', 'text/event-stream');
+    res.setHeader('Cache-Control', 'no-cache');
+    res.setHeader('Connection', 'keep-alive');
+    res.setHeader('Access-Control-Allow-Origin', '*');
+    res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
+
+    try {
+      // Get conversation history
+      const conversationHistory = await storage.getChatMessages(sessionId);
+      
+      // Build enhanced context for voice conversations
+      const systemPrompt = buildVoiceOptimizedPrompt(isVoiceInput);
+      
+      const messages = [
+        { role: 'system', content: systemPrompt },
+        ...conversationHistory.map(msg => ({
+          role: msg.role as 'user' | 'assistant',
+          content: msg.content
+        })),
+        { role: 'user', content: message }
+      ];
+
+      // Create streaming OpenAI completion
+      const stream = await openai.chat.completions.create({
+        model: 'gpt-4o',
+        messages: messages,
+        stream: true,
+        max_tokens: 2000,
+        temperature: 0.7,
+        presence_penalty: 0.1,
+        frequency_penalty: 0.1
+      });
+
+      let fullResponse = '';
+      let tokenBuffer = '';
+      let sentenceBuffer = '';
+
+      // Process streaming tokens
+      for await (const chunk of stream) {
+        const delta = chunk.choices[0]?.delta?.content;
+        
+        if (delta) {
+          fullResponse += delta;
+          tokenBuffer += delta;
+          sentenceBuffer += delta;
+
+          // Send token immediately for UI update
+          res.write(`data: ${JSON.stringify({
+            type: 'token',
+            content: delta,
+            fullResponse: fullResponse,
+            timestamp: Date.now()
+          })}\\n\\n`);
+
+          // Check if we have a complete sentence for TTS generation
+          if (sentenceBuffer.match(/[.!?]+\\s*/) && sentenceBuffer.length > 20) {
+            // Send sentence for immediate TTS processing
+            res.write(`data: ${JSON.stringify({
+              type: 'sentence_complete',
+              sentence: sentenceBuffer.trim(),
+              fullResponse: fullResponse,
+              timestamp: Date.now()
+            })}\\n\\n`);
+            
+            sentenceBuffer = '';
+          }
+
+          // Flush token buffer periodically
+          if (tokenBuffer.length > 50) {
+            res.write(`data: ${JSON.stringify({
+              type: 'token_chunk',
+              chunk: tokenBuffer,
+              fullResponse: fullResponse,
+              timestamp: Date.now()
+            })}\\n\\n`);
+            
+            tokenBuffer = '';
+          }
+        }
+      }
+
+      // Send final complete response
+      res.write(`data: ${JSON.stringify({
+        type: 'complete',
+        fullResponse: fullResponse,
+        timestamp: Date.now()
+      })}\\n\\n`);
+
+      // Save to database
+      await storage.insertChatMessage({
+        sessionId,
+        userId,
+        role: 'user',
+        content: message,
+        timestamp: new Date().toISOString(),
+        isVoiceInput: isVoiceInput
+      });
+
+      await storage.insertChatMessage({
+        sessionId,
+        userId,
+        role: 'assistant',
+        content: fullResponse,
+        timestamp: new Date().toISOString(),
+        isVoiceInput: false
+      });
+      
+      res.write(`data: [DONE]\\n\\n`);
+      res.end();
+
+    } catch (error) {
+      console.error('Streaming error:', error);
+      res.write(`data: ${JSON.stringify({
+        type: 'error',
+        error: error.message,
+        timestamp: Date.now()
+      })}\\n\\n`);
+      res.end();
+    }
+  });
+
+  // Enhanced ElevenLabs TTS with streaming optimization
+  app.post("/api/elevenlabs/tts", async (req, res) => {
+    const { 
+      text, 
+      voice_id = 'JBFqnCBsd6RMkjVDRZzb', // George (British Professor)
+      model_id = 'eleven_turbo_v2_5',
+      optimize_streaming_latency = 3,
+      output_format = 'mp3_44100_128',
+      voice_settings = {
+        stability: 0.5,
+        similarity_boost: 0.75,
+        style: 0.8,
+        use_speaker_boost: true
+      }
+    } = req.body;
+
+    if (!text || text.trim().length === 0) {
+      return res.status(400).json({ error: 'Text is required' });
+    }
+
+    try {
+      const audio = await elevenlabs.textToSpeech.convert(voice_id, {
+        text: text.trim(),
+        modelId: model_id,
+        voice_settings: voice_settings,
+        outputFormat: output_format
+      });
+
+      const chunks: Buffer[] = [];
+      for await (const chunk of audio) {
+        chunks.push(chunk);
+      }
+      const audioBuffer = Buffer.concat(chunks);
+
+      res.set({
+        'Content-Type': 'audio/mpeg',
+        'Content-Length': audioBuffer.length.toString(),
+        'Cache-Control': 'no-cache'
+      });
+
+      res.send(audioBuffer);
+
+    } catch (error: any) {
+      console.error('ElevenLabs TTS error:', error);
+      
+      if (error.status === 429) {
+        return res.status(429).json({ 
+          error: 'Rate limit reached. Please try again in a moment.' 
+        });
+      }
+      
+      if (error.status === 401) {
+        return res.status(401).json({ 
+          error: 'Invalid ElevenLabs API key' 
+        });
+      }
+      
+      res.status(500).json({ 
+        error: 'TTS generation failed',
+        details: error.message 
+      });
+    }
+  });
+
+  // ElevenLabs streaming TTS for real-time synthesis
+  app.post("/api/elevenlabs/stream", async (req, res) => {
+    const { 
+      text, 
+      voice_id = 'JBFqnCBsd6RMkjVDRZzb',
+      model_id = 'eleven_turbo_v2',
+      optimize_streaming_latency = 4,
+      output_format = 'mp3_22050_32'
+    } = req.body;
+
+    if (!text || text.trim().length === 0) {
+      return res.status(400).json({ error: 'Text is required' });
+    }
+
+    try {
+      const audio = await elevenlabs.textToSpeech.convert(voice_id, {
+        text: text.trim(),
+        modelId: model_id,
+        voice_settings: {
+          stability: 0.4,
+          similarity_boost: 0.7,
+          style: 0.6,
+          use_speaker_boost: false
+        },
+        outputFormat: output_format
+      });
+
+      res.set({
+        'Content-Type': 'audio/mpeg',
+        'Cache-Control': 'no-cache'
+      });
+
+      // Stream audio directly to client
+      for await (const chunk of audio) {
+        res.write(chunk);
+      }
+      res.end();
+
+    } catch (error: any) {
+      console.error('ElevenLabs streaming TTS error:', error);
+      
+      if (error.status === 429) {
+        return res.status(429).json({ 
+          error: 'Rate limit reached. Please try again in a moment.' 
+        });
+      }
+      
+      res.status(500).json({ 
+        error: 'Streaming TTS generation failed',
+        details: error.message 
+      });
+    }
+  });
+
+  // Voice configuration API endpoints
+  app.get("/api/voice/available", async (req, res) => {
+    // Return available voices
+    const availableVoices = [
+      { id: 'alloy', name: 'Alloy', description: 'Professional and clear' },
+      { id: 'ash', name: 'Ash', description: 'Casual and conversational' },
+      { id: 'ballad', name: 'Ballad', description: 'Smooth and expressive' },
+      { id: 'coral', name: 'Coral', description: 'Warm and friendly' },
+      { id: 'echo', name: 'Echo', description: 'Clear and articulate' },
+      { id: 'sage', name: 'Sage', description: 'Wise and calming' },
+      { id: 'shimmer', name: 'Shimmer', description: 'Bright and energetic' },
+      { id: 'verse', name: 'Verse', description: 'Poetic and flowing' }
+    ];
+    res.json({ voices: availableVoices });
+  });
+
+  app.post("/api/voice/preference", async (req, res) => {
+    try {
+      const { user_id, voice } = req.body;
+      
+      if (!user_id) {
+        return res.status(400).json({ error: 'user_id is required' });
+      }
+      
+      const validVoices = ['alloy', 'ash', 'ballad', 'coral', 'echo', 'sage', 'shimmer', 'verse'];
+      if (!voice || !validVoices.includes(voice)) {
+        return res.status(400).json({ 
+          error: 'Invalid voice. Must be one of: ' + validVoices.join(', ')
+        });
+      }
+      
+      // For now, just return success. In a full implementation, 
+      // you would store this preference in the database
+      res.json({ 
+        message: 'Voice preference updated successfully',
+        user_id,
+        voice,
+        success: true
+      });
+      
+    } catch (error: any) {
+      console.error('Voice preference error:', error);
+      res.status(500).json({ 
+        error: 'Failed to update voice preference',
+        details: error.message 
+      });
+    }
+  });
+
+  app.get("/api/voice/preference/:userId", async (req, res) => {
+    try {
+      const { userId } = req.params;
+      
+      if (!userId) {
+        return res.status(400).json({ error: 'userId is required' });
+      }
+      
+      // For now, return default voice. In a full implementation,
+      // you would fetch from database
+      res.json({ 
+        user_id: userId,
+        voice: 'alloy', // default voice
+        success: true
+      });
+      
+    } catch (error: any) {
+      console.error('Get voice preference error:', error);
+      res.status(500).json({ 
+        error: 'Failed to get voice preference',
+        details: error.message 
+      });
+    }
+  });
+
   const httpServer = createServer(app);
+
+  // Create WebSocket server for OpenAI Realtime API
+  const wss = new WebSocketServer({ 
+    server: httpServer,
+    path: '/api/realtime/connect'
+  });
+
+  console.log('🎙️ WebSocket server created for OpenAI Realtime API');
+
+  wss.on('connection', (ws, request) => {
+    handleRealtimeWebSocket(ws, request);
+  });
+
+  // Graceful shutdown
+  process.on('SIGTERM', () => {
+    console.log('🔄 SIGTERM received, closing WebSocket connections...');
+    closeAllSessions();
+    wss.close(() => {
+      console.log('✅ WebSocket server closed');
+      process.exit(0);
+    });
+  });
+
+  process.on('SIGINT', () => {
+    console.log('🔄 SIGINT received, closing WebSocket connections...');
+    closeAllSessions();
+    wss.close(() => {
+      console.log('✅ WebSocket server closed');
+      process.exit(0);
+    });
+  });
+
+  // Flutter bridge endpoint for managing conversation context between text and voice modes
+  app.post("/api/flutter/conversation-context", async (req, res) => {
+    try {
+      const { userId, lessonId, action, sessionId } = req.body;
+      
+      if (!userId) {
+        return res.status(400).json({ message: "User ID is required" });
+      }
+
+      switch (action) {
+        case 'get_or_create_session':
+          // Get existing session or create new one
+          let session = null;
+          
+          if (sessionId) {
+            // Try to find existing session
+            session = await storage.getChatSessionBySessionId(sessionId);
+          }
+          
+          if (!session) {
+            // Create new session for Flutter voice mode
+            const newSessionId = `flutter_voice_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+            
+            const sessionData = {
+              sessionId: newSessionId,
+              userId: userId,
+              lessonId: lessonId || 'general',
+              scenario: 'Voice conversation with tutor',
+              entryPoint: 'flutter_voice',
+              webviewParams: null
+            };
+            
+            session = await storage.createChatSession(sessionData);
+          }
+          
+          // Get recent messages for context
+          const messages = await storage.getChatMessages(session.id);
+          
+          res.json({
+            session: {
+              id: session.id,
+              sessionId: session.sessionId,
+              userId: session.userId,
+              lessonId: session.lessonId,
+              scenario: session.scenario
+            },
+            messages: messages.map(msg => ({
+              role: msg.role,
+              content: msg.content,
+              timestamp: msg.createdAt
+            })),
+            contextSummary: messages.length > 0 
+              ? `Previous conversation with ${messages.length} messages. Last message: "${messages[messages.length - 1]?.content?.substring(0, 100)}..."`
+              : 'New conversation starting'
+          });
+          break;
+          
+        case 'sync_session':
+          // Sync a text session for voice continuation
+          if (!sessionId) {
+            return res.status(400).json({ message: "Session ID required for sync" });
+          }
+          
+          const existingSession = await storage.getChatSessionBySessionId(sessionId);
+          if (!existingSession) {
+            return res.status(404).json({ message: "Session not found" });
+          }
+          
+          const sessionMessages = await storage.getChatMessages(existingSession.id);
+          
+          res.json({
+            session: {
+              id: existingSession.id,
+              sessionId: existingSession.sessionId,
+              userId: existingSession.userId,
+              lessonId: existingSession.lessonId,
+              scenario: existingSession.scenario
+            },
+            messages: sessionMessages.map(msg => ({
+              role: msg.role,
+              content: msg.content,
+              timestamp: msg.createdAt
+            })),
+            contextSummary: `Continuing conversation with ${sessionMessages.length} messages`
+          });
+          break;
+          
+        default:
+          return res.status(400).json({ message: "Invalid action" });
+      }
+      
+    } catch (error) {
+      console.error("Flutter conversation context error:", error);
+      res.status(500).json({ message: "Failed to manage conversation context" });
+    }
+  });
+
+  // Setup GPT Realtime WebSocket server
+  if (process.env.OPENAI_API_KEY) {
+    setupGPTRealtimeWebSocket(httpServer, process.env.OPENAI_API_KEY);
+  } else {
+    console.warn('⚠️  OPENAI_API_KEY not found - GPT Realtime WebSocket disabled');
+  }
+
+  // Cleanup GPT Realtime service on shutdown
+  process.on('SIGTERM', async () => {
+    console.log('🧹 Cleaning up GPT Realtime sessions...');
+    await gptRealtimeService.cleanup();
+  });
+
+  process.on('SIGINT', async () => {
+    console.log('🧹 Cleaning up GPT Realtime sessions...');
+    await gptRealtimeService.cleanup();
+  });
+
   return httpServer;
+}
+
+// Helper function to build voice-optimized system prompt
+function buildVoiceOptimizedPrompt(isVoiceInput: boolean): string {
+  const basePrompt = `You are an expert AI communication coach specializing in voice conversations. 
+
+Key guidelines for voice responses:
+- Keep responses conversational and natural-sounding
+- Use shorter sentences (10-20 words) for better speech synthesis
+- Include natural pauses with punctuation
+- Avoid complex formatting or symbols
+- Be encouraging and supportive
+- Ask engaging follow-up questions
+- Provide actionable communication tips`;
+
+  if (isVoiceInput) {
+    return basePrompt + `
+
+Voice-specific instructions:
+- The user is speaking to you, so respond as if in a natural conversation
+- Match their energy and speaking style
+- Use contractions and informal language when appropriate
+- Include verbal acknowledgments like "I understand" or "That's a great point"
+- Keep technical explanations simple and conversational`;
+  }
+
+  return basePrompt;
 }

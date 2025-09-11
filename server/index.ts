@@ -4,8 +4,9 @@ import { registerRoutes } from "./routes";
 import { setupVite, serveStatic, log } from "./vite";
 
 const app = express();
-app.use(express.json());
-app.use(express.urlencoded({ extended: false }));
+// Increase body parser limits for audio file uploads (base64 encoded)
+app.use(express.json({ limit: '10mb' })); // Allow up to 10MB JSON payloads for audio
+app.use(express.urlencoded({ extended: false, limit: '10mb' }));
 
 // Early health check endpoints for faster deployment health checks
 const healthResponse = (req, res) => {
@@ -86,15 +87,13 @@ app.use((req, res, next) => {
     console.log(`   Final port = ${port}`);
     console.log(`   All env vars starting with PORT:`, Object.keys(process.env).filter(k => k.includes('PORT')));
     // Enhanced server startup with better error handling and logging
-    server.listen({
-      port,
-      host: "0.0.0.0",
-      reusePort: true,
-    }, () => {
+    server.listen(port, "0.0.0.0", () => {
       log(`serving on port ${port}`);
       console.log(`✅ SmartyMe Platform deployed successfully!`);
       console.log(`📊 Health endpoints: /health, /healthz, /ping, /status, /api/health`);
-      console.log(`🌍 Server accessible at: http://0.0.0.0:${port}`);
+      console.log(`🌍 Server accessible at:`);
+      console.log(`   📱 Network: http://192.168.31.113:${port}`);
+      console.log(`   💻 Local:   http://127.0.0.1:${port}`);
       console.log(`🚀 Environment: ${process.env.NODE_ENV || 'development'}`);
       
       // Force health check response for deployment verification
