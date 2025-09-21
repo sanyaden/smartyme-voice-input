@@ -1157,6 +1157,19 @@ export async function registerRoutes(app: Express): Promise<Server> {
         'sec-websocket-key': request.headers['sec-websocket-key']
       }
     });
+
+    // Handle Hume AI WebSocket upgrades explicitly
+    if (request.url?.includes('/api/hume-ai/connect')) {
+      console.log('🎭 Handling Hume AI WebSocket upgrade manually');
+      // Let the WebSocket server handle this
+      return;
+    }
+
+    // Handle OpenAI Realtime WebSocket upgrades
+    if (request.url?.includes('/api/realtime/connect')) {
+      console.log('🎙️ Handling OpenAI Realtime WebSocket upgrade manually');
+      return;
+    }
   });
 
   // Create WebSocket server for OpenAI Realtime API
@@ -1175,15 +1188,28 @@ export async function registerRoutes(app: Express): Promise<Server> {
   const humeWss = new WebSocketServer({ 
     server: httpServer,
     path: '/api/hume-ai/connect',
+    handleProtocols: (protocols, request) => {
+      console.log('🔄 WebSocket protocols for Hume AI:', protocols);
+      return false; // Use default protocol
+    },
     verifyClient: (info) => {
       console.log('🔍 WebSocket verification for Hume AI:', {
         origin: info.origin,
         protocol: info.req.httpVersion,
         upgrade: info.req.headers.upgrade,
         connection: info.req.headers.connection,
-        secWebSocketKey: info.req.headers['sec-websocket-key']
+        secWebSocketKey: info.req.headers['sec-websocket-key'],
+        url: info.req.url
       });
-      return true; // Accept all connections for now
+      
+      // Extra validation for Google Cloud Run
+      if (info.req.headers['sec-websocket-key'] && info.req.headers.upgrade?.toLowerCase() === 'websocket') {
+        console.log('✅ Valid WebSocket upgrade request for Hume AI');
+        return true;
+      }
+      
+      console.log('❌ Invalid WebSocket upgrade request for Hume AI');
+      return false;
     }
   });
 
