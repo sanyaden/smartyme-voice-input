@@ -175,6 +175,45 @@ export async function registerRoutes(app: Express): Promise<Server> {
     res.json({ message: 'Test route works!' });
   });
 
+  // WebSocket upgrade detection middleware (MUST be before other middleware)
+  app.use('/api/hume-ai/connect', (req, res, next) => {
+    // Check for WebSocket upgrade headers
+    const isWebSocketUpgrade = req.headers.upgrade?.toLowerCase() === 'websocket' ||
+                              req.headers.connection?.toLowerCase().includes('upgrade') ||
+                              req.headers['sec-websocket-key'];
+    
+    if (isWebSocketUpgrade) {
+      console.log('🎭 WebSocket upgrade request detected for Hume AI');
+      console.log('Headers:', {
+        upgrade: req.headers.upgrade,
+        connection: req.headers.connection,
+        'sec-websocket-key': req.headers['sec-websocket-key'],
+        'sec-websocket-version': req.headers['sec-websocket-version'],
+        protocol: req.httpVersion
+      });
+      // Skip regular Express middleware for WebSocket upgrades
+      return next();
+    }
+    
+    // For non-WebSocket requests, return a helpful message
+    res.status(426).json({
+      error: 'Upgrade Required',
+      message: 'This endpoint requires a WebSocket connection with proper upgrade headers',
+      protocol: 'WebSocket',
+      expectedHeaders: {
+        'Connection': 'Upgrade',
+        'Upgrade': 'websocket',
+        'Sec-WebSocket-Key': '[client-generated-key]',
+        'Sec-WebSocket-Version': '13'
+      },
+      receivedHeaders: {
+        upgrade: req.headers.upgrade,
+        connection: req.headers.connection,
+        'sec-websocket-key': req.headers['sec-websocket-key']
+      }
+    });
+  });
+
   // Apply security to API endpoints (except admin)
   app.use('/api/users', authenticateFlutterApp);
   // Temporarily disable /api/chat authentication for debugging
@@ -1107,6 +1146,19 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   const httpServer = createServer(app);
 
+  // Configure server for WebSocket upgrades (HTTP/1.1 compatibility)
+  httpServer.on('upgrade', (request, socket, head) => {
+    console.log('🔄 HTTP upgrade request received:', {
+      url: request.url,
+      method: request.method,
+      headers: {
+        upgrade: request.headers.upgrade,
+        connection: request.headers.connection,
+        'sec-websocket-key': request.headers['sec-websocket-key']
+      }
+    });
+  });
+
   // Create WebSocket server for OpenAI Realtime API
   const wss = new WebSocketServer({ 
     server: httpServer,
@@ -1119,16 +1171,31 @@ export async function registerRoutes(app: Express): Promise<Server> {
     handleRealtimeWebSocket(ws, request);
   });
 
-  // Create WebSocket server for Hume AI emotion analysis
+  // Create WebSocket server for Hume AI emotion analysis with enhanced options
   const humeWss = new WebSocketServer({ 
     server: httpServer,
-    path: '/api/hume-ai/connect'
+    path: '/api/hume-ai/connect',
+    verifyClient: (info) => {
+      console.log('🔍 WebSocket verification for Hume AI:', {
+        origin: info.origin,
+        protocol: info.req.httpVersion,
+        upgrade: info.req.headers.upgrade,
+        connection: info.req.headers.connection,
+        secWebSocketKey: info.req.headers['sec-websocket-key']
+      });
+      return true; // Accept all connections for now
+    }
   });
 
-  console.log('🎭 WebSocket server created for Hume AI emotion analysis');
+  console.log('🎭 WebSocket server created for Hume AI emotion analysis with HTTP/2 compatibility');
 
   humeWss.on('connection', (ws, request) => {
+    console.log('🎭 Hume AI WebSocket connection established successfully');
     handleHumeAIWebSocket(ws, request);
+  });
+
+  humeWss.on('error', (error) => {
+    console.error('🎭 Hume AI WebSocket server error:', error);
   });
 
   // Graceful shutdown
