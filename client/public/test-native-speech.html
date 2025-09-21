@@ -1,0 +1,142 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Native Speech Test</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            padding: 20px;
+            max-width: 600px;
+            margin: 0 auto;
+        }
+        .info {
+            background: #f0f0f0;
+            padding: 10px;
+            margin: 10px 0;
+            border-radius: 5px;
+        }
+        .success { background: #d4edda; }
+        .error { background: #f8d7da; }
+        .warning { background: #fff3cd; }
+        button {
+            padding: 15px 30px;
+            font-size: 18px;
+            margin: 10px 0;
+            background: #007bff;
+            color: white;
+            border: none;
+            border-radius: 5px;
+        }
+        button:disabled {
+            background: #ccc;
+        }
+        #transcript {
+            border: 1px solid #ccc;
+            padding: 10px;
+            min-height: 100px;
+            margin: 10px 0;
+            font-size: 16px;
+        }
+        .recording {
+            background: #dc3545;
+        }
+    </style>
+</head>
+<body>
+    <h1>Native Speech Bridge Test</h1>
+    
+    <div id="apiCheck" class="info">Checking APIs...</div>
+    
+    <button id="startBtn">🎤 Start Recording</button>
+    <button id="stopBtn" disabled>⏹ Stop Recording</button>
+    
+    <div id="status" class="info">Status: Ready</div>
+    <div id="transcript">
+        <strong>Final:</strong> <span id="finalText"></span><br>
+        <em>Interim:</em> <span id="interimText"></span>
+    </div>
+    
+    <script>
+        const startBtn = document.getElementById('startBtn');
+        const stopBtn = document.getElementById('stopBtn');
+        const statusEl = document.getElementById('status');
+        const apiCheckEl = document.getElementById('apiCheck');
+        const finalTextEl = document.getElementById('finalText');
+        const interimTextEl = document.getElementById('interimText');
+        
+        let finalTranscript = '';
+        
+        // Check for native speech bridge
+        if (window.nativeSpeech && window.nativeSpeech.isAvailable) {
+            apiCheckEl.textContent = '✅ Native Speech Bridge is available';
+            apiCheckEl.className = 'info success';
+            
+            // Set up callbacks
+            window.nativeSpeech.onStart = function() {
+                statusEl.textContent = 'Status: Recording...';
+                statusEl.className = 'info success';
+                startBtn.disabled = true;
+                stopBtn.disabled = false;
+                startBtn.className = 'recording';
+            };
+            
+            window.nativeSpeech.onEnd = function() {
+                statusEl.textContent = 'Status: Stopped';
+                statusEl.className = 'info warning';
+                startBtn.disabled = false;
+                stopBtn.disabled = true;
+                startBtn.className = '';
+            };
+            
+            window.nativeSpeech.onResult = function(transcript, isFinal) {
+                if (isFinal) {
+                    finalTranscript += transcript + ' ';
+                    finalTextEl.textContent = finalTranscript;
+                    interimTextEl.textContent = '';
+                } else {
+                    interimTextEl.textContent = transcript;
+                }
+            };
+            
+            window.nativeSpeech.onError = function(error) {
+                statusEl.textContent = 'Error: ' + error;
+                statusEl.className = 'info error';
+                startBtn.disabled = false;
+                stopBtn.disabled = true;
+                startBtn.className = '';
+            };
+            
+        } else if (window.SpeechRecognition || window.webkitSpeechRecognition) {
+            apiCheckEl.textContent = '⚠️ Browser Speech API detected (may not work in WebView)';
+            apiCheckEl.className = 'info warning';
+        } else {
+            apiCheckEl.textContent = '❌ No speech recognition available';
+            apiCheckEl.className = 'info error';
+            startBtn.disabled = true;
+        }
+        
+        startBtn.addEventListener('click', () => {
+            finalTranscript = '';
+            finalTextEl.textContent = '';
+            interimTextEl.textContent = '';
+            
+            if (window.nativeSpeech && window.nativeSpeech.start) {
+                window.nativeSpeech.start();
+            } else if (window.SpeechRecognition || window.webkitSpeechRecognition) {
+                // Fallback to browser API
+                const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+                const recognition = new SpeechRecognition();
+                recognition.start();
+            }
+        });
+        
+        stopBtn.addEventListener('click', () => {
+            if (window.nativeSpeech && window.nativeSpeech.stop) {
+                window.nativeSpeech.stop();
+            }
+        });
+    </script>
+</body>
+</html>

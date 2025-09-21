@@ -1,0 +1,23 @@
+--- ../mega-app/lib/smarty_me/app/features/end_of_lesson_placement/web_view_bottom_sheet.dart	2025-08-11 20:39:32.794913039 +0300
++++ mega-app-with-mic/lib/smarty_me/app/features/end_of_lesson_placement/web_view_bottom_sheet.dart	2025-08-21 20:39:43.145671815 +0300
+@@ -72,6 +72,20 @@
+                   ),
+                   child: InAppWebView(
+                     initialUrlRequest: URLRequest(url: WebUri(url)),
++                    initialSettings: InAppWebViewSettings(
++                      javaScriptEnabled: true,
++                      mediaPlaybackRequiresUserGesture: false,
++                      allowsInlineMediaPlayback: true,
++                      iframeAllow: "camera; microphone",
++                      iframeAllowFullscreen: true,
++                    ),
++                    onPermissionRequest: (controller, request) async {
++                      // Grant all permissions including microphone
++                      return PermissionResponse(
++                        resources: request.resources,
++                        action: PermissionResponseAction.GRANT,
++                      );
++                    },
+                     gestureRecognizers: {
+                       Factory<VerticalDragGestureRecognizer>(
+                         () => VerticalDragGestureRecognizer(),

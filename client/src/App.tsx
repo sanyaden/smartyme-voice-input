@@ -17,6 +17,7 @@ import ChatFeedbackPage from "@/pages/chat-feedback";
 import ProfilePage from "@/pages/profile";
 import WelcomePage from "@/pages/welcome";
 import WebViewPage from "@/pages/webview";
+import VoiceTutorPage from "@/pages/voice-tutor";
 import AdminLogin from "@/pages/AdminLogin";
 import AdminDashboard from "@/pages/AdminDashboard";
 import NotFound from "@/pages/not-found";
@@ -26,6 +27,7 @@ function Router() {
     <Switch>
       <Route path="/welcome" component={WelcomePage} />
       <Route path="/webview" component={WebViewPage} />
+      <Route path="/voice-tutor" component={VoiceTutorPage} />
       <Route path="/lessons" component={MainPage} />
       <Route path="/" component={AiTutorPage} />
       <Route path="/lesson-overview/:id" component={LessonOverviewPage} />

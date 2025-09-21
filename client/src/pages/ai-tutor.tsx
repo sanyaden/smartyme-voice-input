@@ -4,6 +4,7 @@ import { Card, CardContent } from "@/components/ui/card";
 import ChatBubble from "@/components/ChatBubble";
 import { getBaseScenarios, getAllPostLessonScenarios } from "@/lib/ai-scenarios";
 import { usePageTitle } from "@/hooks/use-page-title";
+import { getWebViewParams } from "@/contexts/WebViewContext";
 import type { Lesson } from "../lib/lessons";
 import { mrSmartImage, getScenarioImage } from "@/lib/assets";
 
@@ -28,7 +29,25 @@ export default function AiTutorPage() {
     : baseScenarios;
 
   const handleScenarioClick = (scenario: any) => {
-    // Store scenario data for the chat, including lesson title if post-lesson
+    // Handle voice scenarios differently
+    if (scenario.isVoice) {
+      // Get webview parameters for voice conversation
+      const webViewParams = getWebViewParams();
+      const urlParams = new URLSearchParams(window.location.search);
+      
+      const voiceParams = new URLSearchParams({
+        user_id: urlParams.get('user_id') || webViewParams.userId || 'web_user',
+        lesson_id: lessonId?.toString() || urlParams.get('lesson_id') || webViewParams.lessonId || 'general',
+        course_id: urlParams.get('course_id') || webViewParams.courseId || '',
+        voice: 'alloy',
+        mode: isPostLesson ? 'lesson' : 'practice'
+      });
+      
+      setLocation(`/voice-tutor?${voiceParams.toString()}`);
+      return;
+    }
+
+    // Handle text scenarios (existing logic)
     const scenarioWithContext = {
       ...scenario,
       lessonTitle: lesson?.title || null,

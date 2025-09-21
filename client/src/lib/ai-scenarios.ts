@@ -6,10 +6,19 @@ export interface Scenario {
   prompt: string;
   tags?: string[];
   difficulty?: 'beginner' | 'intermediate' | 'advanced';
+  isVoice?: boolean; // Mark voice scenarios
 }
 
 export function getBaseScenarios(): Scenario[] {
   return [
+    {
+      title: "Voice conversation with tutor",
+      description: "Practice speaking naturally with real-time voice feedback.",
+      prompt: "You are Mr. Smart, a friendly communication coach. Have a natural voice conversation with the user, helping them practice speaking clearly and confidently. Provide gentle feedback and encourage natural dialogue.",
+      tags: ["voice", "speaking", "practice"],
+      difficulty: "intermediate",
+      isVoice: true
+    },
     {
       title: "Role play a situation",
       description: "Practice conversations with instant feedback.",

@@ -248,6 +248,97 @@ export async function registerRoutes(app: Express): Promise<Server> {
     });
   });
 
+  // HTTP polling fallback for Google Cloud Run (WebSocket alternative)
+  app.post("/api/hume-ai/session", async (req, res) => {
+    try {
+      const { userId, sessionId } = req.body;
+      const finalSessionId = sessionId || `hume_http_${Date.now()}`;
+      const finalUserId = userId || 'anonymous';
+      
+      console.log(`🎭 Creating HTTP session for Hume AI: ${finalSessionId}`);
+      
+      // Create session entry
+      humeConnections.set(finalSessionId, {
+        ws: null as any, // HTTP session doesn't have WebSocket
+        userId: finalUserId,
+        connected: true,
+        startTime: Date.now()
+      });
+      
+      res.json({
+        sessionId: finalSessionId,
+        userId: finalUserId,
+        connected: true,
+        timestamp: Date.now(),
+        message: 'HTTP session created successfully'
+      });
+      
+    } catch (error: any) {
+      console.error('HTTP session creation error:', error);
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  app.post("/api/hume-ai/analyze", async (req, res) => {
+    try {
+      const { sessionId, audioData, format = 'webm' } = req.body;
+      
+      if (!sessionId || !audioData) {
+        return res.status(400).json({ error: 'sessionId and audioData are required' });
+      }
+      
+      console.log(`🧠 HTTP emotion analysis for session: ${sessionId}`);
+      
+      // Convert base64 audio to buffer
+      const audioBuffer = Buffer.from(audioData, 'base64');
+      
+      // Analyze emotions (with fallback to simulation)
+      const emotions = await analyzeEmotionsWithHumeAI(audioBuffer, format);
+      
+      // Generate transcript (simulated for now)
+      const transcript = generateHumeTranscript();
+      
+      // Generate AI response based on emotions
+      const aiResponse = generateHumeEmotionResponse(emotions, transcript);
+      const topEmotion = getHumeTopEmotion(emotions);
+      
+      res.json({
+        sessionId,
+        emotions,
+        transcript,
+        aiResponse,
+        topEmotion,
+        timestamp: Date.now(),
+        status: 'success'
+      });
+      
+    } catch (error: any) {
+      console.error('HTTP emotion analysis error:', error);
+      res.status(500).json({ 
+        error: 'Emotion analysis failed',
+        details: error.message 
+      });
+    }
+  });
+
+  app.delete("/api/hume-ai/session/:sessionId", (req, res) => {
+    try {
+      const { sessionId } = req.params;
+      
+      if (humeConnections.has(sessionId)) {
+        humeConnections.delete(sessionId);
+        console.log(`🎭 HTTP session deleted: ${sessionId}`);
+        res.json({ message: 'Session deleted successfully', sessionId });
+      } else {
+        res.status(404).json({ error: 'Session not found', sessionId });
+      }
+      
+    } catch (error: any) {
+      console.error('HTTP session deletion error:', error);
+      res.status(500).json({ error: error.message });
+    }
+  });
+
   // Admin login endpoint
   app.post("/api/admin/login", adminAuth, async (req, res) => {
     res.json({ message: "Login successful", token: process.env.ADMIN_PASSWORD });

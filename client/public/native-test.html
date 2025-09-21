@@ -1,0 +1,150 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Native Speech Test</title>
+    <style>
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, sans-serif;
+            padding: 20px;
+            max-width: 500px;
+            margin: 0 auto;
+        }
+        button {
+            font-size: 20px;
+            padding: 15px 30px;
+            margin: 10px;
+            border: none;
+            border-radius: 10px;
+            background: #007bff;
+            color: white;
+        }
+        #log {
+            background: #f0f0f0;
+            padding: 15px;
+            border-radius: 10px;
+            margin: 20px 0;
+            font-family: monospace;
+            white-space: pre-wrap;
+            max-height: 400px;
+            overflow-y: auto;
+        }
+        #transcript {
+            background: white;
+            padding: 15px;
+            border: 2px solid #007bff;
+            border-radius: 10px;
+            margin: 20px 0;
+            min-height: 50px;
+        }
+    </style>
+</head>
+<body>
+    <h1>Native Speech Bridge Test</h1>
+    
+    <div id="transcript">Transcript will appear here...</div>
+    
+    <button onclick="checkBridge()">Check Bridge</button>
+    <button onclick="setupCallbacks()">Setup Callbacks</button>
+    <button onclick="startSpeech()">Start Speech</button>
+    <button onclick="stopSpeech()">Stop Speech</button>
+    
+    <div id="log"></div>
+    
+    <script>
+        const logEl = document.getElementById('log');
+        const transcriptEl = document.getElementById('transcript');
+        
+        function log(msg) {
+            const time = new Date().toLocaleTimeString();
+            logEl.textContent += `[${time}] ${msg}\n`;
+            console.log(msg);
+        }
+        
+        function checkBridge() {
+            log('Checking bridge...');
+            log('window.webkit: ' + !!window.webkit);
+            log('window.webkit.messageHandlers: ' + !!(window.webkit && window.webkit.messageHandlers));
+            log('speechBridge: ' + !!(window.webkit && window.webkit.messageHandlers && window.webkit.messageHandlers.speechBridge));
+            log('window.nativeSpeech: ' + !!window.nativeSpeech);
+            
+            if (window.nativeSpeech) {
+                log('nativeSpeech methods:');
+                log('  - start: ' + typeof window.nativeSpeech.start);
+                log('  - stop: ' + typeof window.nativeSpeech.stop);
+                log('  - onResult: ' + typeof window.nativeSpeech.onResult);
+                log('  - onStart: ' + typeof window.nativeSpeech.onStart);
+                log('  - onEnd: ' + typeof window.nativeSpeech.onEnd);
+            }
+        }
+        
+        function setupCallbacks() {
+            log('Setting up callbacks...');
+            
+            if (!window.nativeSpeech) {
+                log('ERROR: nativeSpeech not found!');
+                return;
+            }
+            
+            window.nativeSpeech.onStart = function() {
+                log('✅ onStart callback fired!');
+                transcriptEl.textContent = 'Listening...';
+            };
+            
+            window.nativeSpeech.onEnd = function() {
+                log('✅ onEnd callback fired!');
+            };
+            
+            window.nativeSpeech.onResult = function(text, isFinal) {
+                log(`✅ onResult: "${text}" (final: ${isFinal})`);
+                if (isFinal) {
+                    transcriptEl.textContent = 'Final: ' + text;
+                } else {
+                    transcriptEl.textContent = 'Interim: ' + text;
+                }
+            };
+            
+            window.nativeSpeech.onError = function(error) {
+                log('❌ onError: ' + error);
+                transcriptEl.textContent = 'Error: ' + error;
+            };
+            
+            window.nativeSpeech.onStatus = function(status) {
+                log('📊 onStatus: ' + status);
+            };
+            
+            log('Callbacks set up successfully');
+        }
+        
+        function startSpeech() {
+            log('Starting speech...');
+            if (window.nativeSpeech && window.nativeSpeech.start) {
+                window.nativeSpeech.start();
+                log('Start command sent');
+            } else {
+                log('ERROR: nativeSpeech.start not available');
+            }
+        }
+        
+        function stopSpeech() {
+            log('Stopping speech...');
+            if (window.nativeSpeech && window.nativeSpeech.stop) {
+                window.nativeSpeech.stop();
+                log('Stop command sent');
+            } else {
+                log('ERROR: nativeSpeech.stop not available');
+            }
+        }
+        
+        // Check on load
+        window.addEventListener('load', function() {
+            log('Page loaded');
+            setTimeout(function() {
+                checkBridge();
+                setupCallbacks();
+            }, 1000);
+        });
+    </script>
+</body>
+</html>

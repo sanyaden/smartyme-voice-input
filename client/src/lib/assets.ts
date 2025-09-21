@@ -12,6 +12,7 @@ import quizImageSrc from "@assets/take-the-quiz.png";
 import lessonQuizImageSrc from "@assets/image 56_1749809015467.png";
 import phraseDetoxImageSrc from "@assets/Phrase-detox-coach.png";
 import clarityRewriterImageSrc from "@assets/image 54_1749810030004.png";
+import microphoneIconSrc from "@assets/microphone-icon.svg";
 
 // Export for other components to use
 export const mrSmartImage = mrSmartImageSrc;
@@ -20,12 +21,15 @@ export const quizImage = quizImageSrc;
 export const lessonQuizImage = lessonQuizImageSrc;
 export const phraseDetoxImage = phraseDetoxImageSrc;
 export const clarityRewriterImage = clarityRewriterImageSrc;
+export const microphoneIcon = microphoneIconSrc;
 
 // Function to get the appropriate image for each scenario
 export function getScenarioImage(title: string): string {
   const titleLower = title.toLowerCase();
   
-  if (titleLower.includes("role play")) {
+  if (titleLower.includes("voice") || titleLower.includes("microphone")) {
+    return microphoneIcon;
+  } else if (titleLower.includes("role play")) {
     return rolePlayImage;
   } else if (titleLower.includes("quick quiz on") || titleLower.includes("quiz on this lesson")) {
     return lessonQuizImage;

@@ -120,8 +120,12 @@ export function useSpeechRecognition({
     const SpeechRecognitionAPI = window.SpeechRecognition || window.webkitSpeechRecognition;
     const hasAPI = !!SpeechRecognitionAPI;
     
-    // Environment checks
-    const isHTTPS = window.location.protocol === 'https:' || window.location.hostname === 'localhost';
+    // Environment checks - allow local network IPs for testing
+    const isHTTPS = window.location.protocol === 'https:' || 
+                   window.location.hostname === 'localhost' ||
+                   window.location.hostname.startsWith('192.168.') ||
+                   window.location.hostname.startsWith('10.') ||
+                   window.location.hostname.startsWith('172.');
     
     // Device type detection
     const deviceType = /Mobile|Android|iPhone|iPad/.test(userAgent) 
@@ -135,12 +139,15 @@ export function useSpeechRecognition({
     else if (/Windows/.test(userAgent)) operatingSystem = 'windows';
     else if (/Linux/.test(userAgent)) operatingSystem = 'linux';
     
-    // Browser detection
+    // Browser detection - WebView on iOS uses Safari engine
     let browser: DeviceCompatibilityInfo['browser'] = 'unknown';
+    const isIOSWebView = operatingSystem === 'ios' && /AppleWebKit/.test(userAgent);
+    
     if (/Edg\//.test(userAgent)) browser = 'edge';
     else if (/Chrome/.test(userAgent) && !/Edg\//.test(userAgent)) browser = 'chrome';
     else if (/Safari/.test(userAgent) && !/Chrome/.test(userAgent)) browser = 'safari';
     else if (/Firefox/.test(userAgent)) browser = 'firefox';
+    else if (isIOSWebView) browser = 'safari'; // iOS WebView uses Safari engine
     
     // Determine browser support level
     let browserSupport: DeviceCompatibilityInfo['browserSupport'] = 'none';
@@ -205,6 +212,123 @@ export function useSpeechRecognition({
     const compatibility = detectDeviceCompatibility();
     setDeviceInfo(compatibility);
     
+    // Check for native iOS speech bridge - it might be injected after page load
+    const checkNativeSpeech = () => {
+      const hasNativeSpeech = !!(window as any).nativeSpeech;
+      console.log('[Speech] Checking for native speech bridge:', hasNativeSpeech);
+      
+      if (hasNativeSpeech) {
+        console.log('[Speech] Native iOS speech bridge detected, using native implementation');
+        debugLog('voice', '[Speech] Native iOS speech bridge detected, using native implementation');
+        setIsSupported(true);
+        onCompatibilityCheckRef.current?.(true, compatibility);
+        
+        // Set up native speech handlers
+        const nativeSpeech = (window as any).nativeSpeech;
+      
+      // Create a wrapper that mimics SpeechRecognition API
+      const nativeWrapper = {
+        start: () => {
+          console.log('🎤🚀 [Speech] START CALLED - Starting native speech recognition with delay...');
+          debugLog('voice', '[Speech] Starting native speech recognition');
+          // Add a longer delay to ensure TTS audio and previous audio session has fully ended
+          setTimeout(() => {
+            console.log('🎤⏰ [Speech] Delay completed, calling nativeSpeech.start()');
+            try {
+              nativeSpeech.start();
+              console.log('🎤✨ [Speech] nativeSpeech.start() called successfully');
+            } catch (error) {
+              console.error('🎤❌ [Speech] Error calling nativeSpeech.start():', error);
+            }
+          }, 1000);
+        },
+        stop: () => {
+          debugLog('voice', '[Speech] Stopping native speech recognition');
+          nativeSpeech.stop();
+        },
+        abort: () => {
+          debugLog('voice', '[Speech] Aborting native speech recognition');
+          nativeSpeech.stop();
+        }
+      };
+      
+      // Set up callbacks for native speech
+      nativeSpeech.onStart = () => {
+        console.log('🎤✅ [Speech] Native recognition started successfully');
+        debugLog('voice', '[Speech] Native recognition started');
+        setIsListening(true);
+        isListeningRef.current = true;
+        setInterimTranscript('');
+        onStartRef.current?.();
+      };
+      
+      nativeSpeech.onEnd = () => {
+        console.log('[Speech] Native recognition ended');
+        debugLog('voice', '[Speech] Native recognition ended');
+        setIsListening(false);
+        isListeningRef.current = false;
+        
+        // Add a longer delay to allow TTS audio and buffers to fully clear
+        setTimeout(() => {
+          onEndRef.current?.();
+        }, 500);
+      };
+      
+      nativeSpeech.onResult = (text: string, isFinal: boolean) => {
+        console.log('🔥🔥🔥 [Speech] Native result received:', text, 'isFinal:', isFinal);
+        debugLog('voice', '[Speech] Native result:', { text, isFinal });
+        
+        if (isFinal) {
+          // If final result is empty, use the current interim transcript state
+          const finalText = text.trim() || interimTranscript;
+          if (finalText) {
+            console.log('🔥 [Speech] Calling onResultRef with:', finalText);
+            setTranscript(finalText);
+            setInterimTranscript('');
+            onResultRef.current?.(finalText, true);
+            console.log('🔥 [Speech] Final transcript set and callback called:', finalText);
+          }
+        } else {
+          setInterimTranscript(text);
+          console.log('🔥 [Speech] Interim transcript set:', text);
+          // ALSO call the callback for interim results to ensure it's working
+          onResultRef.current?.(text, false);
+        }
+      };
+      
+      nativeSpeech.onError = (error: string) => {
+        console.log('[Speech] Native error:', error);
+        debugLog('voice', '[Speech] Native error:', error);
+        // Don't treat "No speech detected" or "Recognition request was canceled" as critical errors
+        if (!error.includes('No speech detected') && !error.includes('Recognition request was canceled')) {
+          onErrorRef.current?.(error, 'native-error');
+        }
+      };
+      
+      nativeSpeech.onStatus = (status: string) => {
+        console.log('[Speech] Native status:', status);
+        debugLog('voice', '[Speech] Native status:', status);
+      };
+      
+      recognitionRef.current = nativeWrapper as any;
+      isInitialized.current = true;
+      return true; // Return true to indicate native speech was found
+      }
+      return false; // Return false if native speech not found
+    };
+    
+    // Check immediately and then with a delay for WebView injection
+    if (checkNativeSpeech()) {
+      return; // Native speech found and initialized
+    }
+    
+    // Check again after a delay in case the bridge is injected later
+    setTimeout(() => {
+      if (!isInitialized.current && checkNativeSpeech()) {
+        console.log('[Speech] Native speech bridge found after delay');
+      }
+    }, 1000);
+    
     const initialSupported = compatibility.recommendedAction !== 'fallback';
     setIsSupported(initialSupported);
     
@@ -247,7 +371,7 @@ export function useSpeechRecognition({
             debugLog('voice', '[Speech] Auto-stopping after timeout');
             recognitionRef.current.stop();
           }
-        }, 15000); // 15 second timeout
+        }, 30000); // Increased to 30 second timeout to avoid conflicts with conversational mode
       };
       
       recognition.onend = () => {
@@ -408,7 +532,10 @@ export function useSpeechRecognition({
   }, []); // Run only once on mount to prevent infinite loops
 
   const startListening = useCallback(async () => {
-    if (!isSupported) {
+    // Check for native speech bridge first
+    const hasNativeSpeech = !!(window as any).nativeSpeech;
+    
+    if (!isSupported && !hasNativeSpeech) {
       let message = 'Voice input is not available in this development environment.';
       
       const isDevelopment = window.location.port === '5000' || window.location.hostname === 'localhost';

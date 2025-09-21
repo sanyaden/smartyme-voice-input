@@ -131,7 +131,7 @@ export function useFlutterWebViewVoice({
       
       // Show user-friendly message
       if (retryCount === 0) {
-        onError?.('Voice input interrupted. Retrying...');
+        onError?.('Microphone interrupted. Retrying...');
       }
     } else {
       // Reset retry count on non-recoverable error or max retries reached
@@ -142,7 +142,7 @@ export function useFlutterWebViewVoice({
         if (errorType === 'not-allowed') {
           onError?.('Microphone access denied. Please check your app permissions.');
         } else if (errorType === 'immediate-end' && retryCount >= maxRetries) {
-          onError?.('Voice input not available in this browser. Please type your message instead.');
+          onError?.('Microphone not available in this browser. Please type your message instead.');
         } else {
           onError?.(error);
         }
@@ -184,7 +184,7 @@ export function useFlutterWebViewVoice({
       
       // Check if we're in a secure context (required for speech API)
       if (!window.isSecureContext) {
-        onError?.('Voice input requires a secure connection (HTTPS). Please use the secure version of the app.');
+        onError?.('Microphone requires a secure connection (HTTPS). Please use the secure version of the app.');
         return;
       }
       
@@ -205,7 +205,7 @@ export function useFlutterWebViewVoice({
       // Don't propagate permission errors in WebView - let the app handle them
       if (!isWebView || !String(error).includes('permission')) {
         if (isWebView) {
-          onError?.('Voice input failed to start. Please ensure microphone permissions are granted in your device settings.');
+          onError?.('Microphone failed to start. Please ensure microphone permissions are granted in your device settings.');
         }
       }
     }

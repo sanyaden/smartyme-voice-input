@@ -556,20 +556,70 @@ body {
   }
 }
 
-/* Voice Recording Animations */
-@keyframes voicePulse {
+/* Enhanced Voice Volume Level Animations */
+@keyframes voiceVolume {
+  0%, 100% {
+    opacity: 1;
+    transform: scaleY(1);
+  }
+  25% {
+    opacity: 0.8;
+    transform: scaleY(1.2);
+  }
+  50% {
+    opacity: 0.6;
+    transform: scaleY(0.7);
+  }
+  75% {
+    opacity: 0.9;
+    transform: scaleY(1.1);
+  }
+}
+
+@keyframes voiceVolumeHigh {
+  0%, 100% {
+    opacity: 1;
+    transform: scaleY(1);
+  }
+  25% {
+    opacity: 0.9;
+    transform: scaleY(1.4);
+  }
+  50% {
+    opacity: 0.7;
+    transform: scaleY(0.6);
+  }
+  75% {
+    opacity: 0.95;
+    transform: scaleY(1.3);
+  }
+}
+
+@keyframes voiceVolumeLow {
   0%, 100% {
     opacity: 1;
     transform: scaleY(1);
   }
   50% {
-    opacity: 0.5;
-    transform: scaleY(0.5);
+    opacity: 0.4;
+    transform: scaleY(0.3);
   }
 }
 
+.voice-volume-indicator {
+  animation: voiceVolume 1.2s ease-in-out infinite;
+}
+
+.voice-volume-high {
+  animation: voiceVolumeHigh 0.8s ease-in-out infinite;
+}
+
+.voice-volume-low {
+  animation: voiceVolumeLow 1.8s ease-in-out infinite;
+}
+
 .voice-recording-indicator {
-  animation: voicePulse 1s ease-in-out infinite;
+  animation: voiceVolume 1s ease-in-out infinite;
 }
 
 /* Microphone Button Pulse Animation */
@@ -587,4 +637,63 @@ body {
 
 .mic-recording {
   animation: micPulse 1.5s infinite;
+}
+
+/* Hide debug overlays and development tools */
+[data-debug="true"],
+.debug-overlay,
+.debug-panel,
+.debug-info,
+.timing-info,
+.app-debug,
+.smarty-debug,
+[class*="debug"],
+[id*="debug"],
+.__react-dev-overlay,
+.__next-dev-overlay,
+.vite-error-overlay,
+.vite-overlay {
+  display: none !important;
+  visibility: hidden !important;
+  opacity: 0 !important;
+  pointer-events: none !important;
+}
+
+/* Hide React DevTools and other browser dev overlays */
+#react-devtools-root,
+#__next-dev-error-overlay,
+#__vite-error-overlay {
+  display: none !important;
+}
+
+/* Hide Flutter/iOS debug elements */
+[class*="flutter-debug"],
+[class*="ios-debug"], 
+[id*="flutter-debug"],
+[id*="ios-debug"],
+[data-smarty*="debug"],
+[title*="SmartyApp"],
+[class*="app-name"],
+[class*="timing"],
+.fps-counter,
+.performance-monitor,
+.debug-timing {
+  display: none !important;
+  visibility: hidden !important;
+}
+
+/* Hide any black background debug boxes */
+div[style*="background: black"],
+div[style*="background-color: black"],
+div[style*="background:#000"],
+div[style*="background-color:#000"] {
+  display: none !important;
+}
+
+/* Hide iOS/WebView debug status elements */
+[class*="webview-debug"],
+[class*="status-debug"],
+.cordova-debug,
+.phonegap-debug {
+  display: none !important;
 }

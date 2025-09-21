@@ -1,0 +1,244 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Speech Debug</title>
+    <style>
+        body {
+            font-family: monospace;
+            padding: 20px;
+            max-width: 800px;
+            margin: 0 auto;
+        }
+        .section {
+            background: #f5f5f5;
+            padding: 15px;
+            margin: 10px 0;
+            border-radius: 5px;
+            border: 1px solid #ddd;
+        }
+        .success { background: #d4edda; border-color: #c3e6cb; }
+        .error { background: #f8d7da; border-color: #f5c6cb; }
+        .warning { background: #fff3cd; border-color: #ffeaa7; }
+        button {
+            padding: 12px 24px;
+            font-size: 16px;
+            margin: 5px;
+            background: #007bff;
+            color: white;
+            border: none;
+            border-radius: 5px;
+            cursor: pointer;
+        }
+        button:disabled {
+            background: #6c757d;
+            cursor: not-allowed;
+        }
+        #log {
+            background: #000;
+            color: #0f0;
+            padding: 15px;
+            font-family: 'Courier New', monospace;
+            font-size: 12px;
+            max-height: 300px;
+            overflow-y: auto;
+            white-space: pre-wrap;
+        }
+        .log-entry {
+            margin: 2px 0;
+        }
+        .log-time {
+            color: #888;
+        }
+        .log-error {
+            color: #f66;
+        }
+        .log-success {
+            color: #6f6;
+        }
+        .log-info {
+            color: #66f;
+        }
+    </style>
+</head>
+<body>
+    <h1>Speech Recognition Debug</h1>
+    
+    <div class="section">
+        <h3>Environment Check</h3>
+        <div id="envCheck"></div>
+    </div>
+    
+    <div class="section">
+        <h3>API Detection</h3>
+        <div id="apiCheck"></div>
+    </div>
+    
+    <div class="section">
+        <h3>Controls</h3>
+        <button id="testNative">Test Native Bridge</button>
+        <button id="startSpeech">Start Speech</button>
+        <button id="stopSpeech" disabled>Stop Speech</button>
+    </div>
+    
+    <div class="section">
+        <h3>Debug Log</h3>
+        <div id="log"></div>
+    </div>
+    
+    <div class="section">
+        <h3>Transcript</h3>
+        <div id="transcript">Waiting for speech...</div>
+    </div>
+    
+    <script>
+        const log = document.getElementById('log');
+        const envCheck = document.getElementById('envCheck');
+        const apiCheck = document.getElementById('apiCheck');
+        const transcript = document.getElementById('transcript');
+        const startBtn = document.getElementById('startSpeech');
+        const stopBtn = document.getElementById('stopSpeech');
+        const testBtn = document.getElementById('testNative');
+        
+        function addLog(message, type = 'info') {
+            const time = new Date().toLocaleTimeString();
+            const entry = document.createElement('div');
+            entry.className = 'log-entry';
+            entry.innerHTML = `<span class="log-time">[${time}]</span> <span class="log-${type}">${message}</span>`;
+            log.appendChild(entry);
+            log.scrollTop = log.scrollHeight;
+        }
+        
+        // Environment checks
+        addLog('Starting environment check...', 'info');
+        
+        const env = {
+            userAgent: navigator.userAgent,
+            platform: navigator.platform,
+            protocol: window.location.protocol,
+            host: window.location.host,
+            isSecure: window.isSecureContext,
+            hasWebkit: !!window.webkit,
+            hasMessageHandlers: !!(window.webkit && window.webkit.messageHandlers),
+            hasSpeechBridge: !!(window.webkit && window.webkit.messageHandlers && window.webkit.messageHandlers.speechBridge)
+        };
+        
+        envCheck.innerHTML = `
+            <pre>User Agent: ${env.userAgent}
+Platform: ${env.platform}
+Protocol: ${env.protocol}
+Host: ${env.host}
+Secure Context: ${env.isSecure}
+WebKit Available: ${env.hasWebkit}
+Message Handlers: ${env.hasMessageHandlers}
+Speech Bridge: ${env.hasSpeechBridge}</pre>
+        `;
+        
+        // API Detection
+        const apis = {
+            nativeSpeech: !!window.nativeSpeech,
+            nativeSpeechAvailable: window.nativeSpeech ? window.nativeSpeech.isAvailable : false,
+            webSpeechAPI: !!window.SpeechRecognition,
+            webkitSpeechAPI: !!window.webkitSpeechRecognition,
+            mediaDevices: !!navigator.mediaDevices,
+            getUserMedia: !!(navigator.mediaDevices && navigator.mediaDevices.getUserMedia)
+        };
+        
+        apiCheck.innerHTML = `
+            <pre>Native Speech Object: ${apis.nativeSpeech}
+Native Speech Available: ${apis.nativeSpeechAvailable}
+Web Speech API: ${apis.webSpeechAPI}
+WebKit Speech API: ${apis.webkitSpeechAPI}
+Media Devices: ${apis.mediaDevices}
+getUserMedia: ${apis.getUserMedia}</pre>
+        `;
+        
+        if (apis.nativeSpeech) {
+            addLog('✓ Native speech bridge detected', 'success');
+            
+            // Set up native speech callbacks
+            window.nativeSpeech.onStart = function() {
+                addLog('Native speech started', 'success');
+                startBtn.disabled = true;
+                stopBtn.disabled = false;
+            };
+            
+            window.nativeSpeech.onEnd = function() {
+                addLog('Native speech ended', 'info');
+                startBtn.disabled = false;
+                stopBtn.disabled = true;
+            };
+            
+            window.nativeSpeech.onResult = function(text, isFinal) {
+                addLog(`Result received - Final: ${isFinal}, Text: "${text}"`, 'success');
+                transcript.innerHTML = `<strong>${isFinal ? 'Final' : 'Interim'}:</strong> ${text}`;
+            };
+            
+            window.nativeSpeech.onError = function(error) {
+                addLog(`Error: ${error}`, 'error');
+                startBtn.disabled = false;
+                stopBtn.disabled = true;
+            };
+        } else {
+            addLog('✗ Native speech bridge not found', 'error');
+            addLog('Checking for fallback options...', 'info');
+            
+            if (apis.webSpeechAPI || apis.webkitSpeechAPI) {
+                addLog('Web Speech API found (may not work in WebView)', 'warning');
+            } else {
+                addLog('No speech recognition available', 'error');
+            }
+        }
+        
+        // Test native bridge
+        testBtn.addEventListener('click', () => {
+            addLog('Testing native bridge...', 'info');
+            
+            if (window.webkit && window.webkit.messageHandlers && window.webkit.messageHandlers.speechBridge) {
+                try {
+                    window.webkit.messageHandlers.speechBridge.postMessage({command: 'test'});
+                    addLog('Message sent to native bridge', 'success');
+                } catch (e) {
+                    addLog(`Failed to send message: ${e.message}`, 'error');
+                }
+            } else {
+                addLog('Native bridge not available', 'error');
+            }
+        });
+        
+        // Start speech
+        startBtn.addEventListener('click', () => {
+            addLog('Starting speech recognition...', 'info');
+            
+            if (window.nativeSpeech && window.nativeSpeech.start) {
+                try {
+                    window.nativeSpeech.start();
+                    addLog('Start command sent', 'success');
+                } catch (e) {
+                    addLog(`Failed to start: ${e.message}`, 'error');
+                }
+            } else {
+                addLog('Native speech not available', 'error');
+            }
+        });
+        
+        // Stop speech
+        stopBtn.addEventListener('click', () => {
+            addLog('Stopping speech recognition...', 'info');
+            
+            if (window.nativeSpeech && window.nativeSpeech.stop) {
+                try {
+                    window.nativeSpeech.stop();
+                    addLog('Stop command sent', 'success');
+                } catch (e) {
+                    addLog(`Failed to stop: ${e.message}`, 'error');
+                }
+            }
+        });
+        
+        // Log page load complete
+        addLog('Page load complete', 'success');
+    </script>
+</body>
+</html>

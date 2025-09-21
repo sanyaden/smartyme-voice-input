@@ -62,6 +62,18 @@ export default function ChatPage() {
   const [voiceError, setVoiceError] = useState<string | null>(null);
   const [voiceErrorType, setVoiceErrorType] = useState<string | null>(null);
   const [voiceDisabledForSession, setVoiceDisabledForSession] = useState(false);
+  const [conversationalMode, setConversationalMode] = useState(false);
+  const conversationalToggleRef = useRef(false); // Prevent double-clicking
+  const conversationalTimeoutRef = useRef<NodeJS.Timeout | null>(null); // 20-second timeout
+  const conversationalModeRef = useRef(false); // Track conversational mode for callbacks
+  const webviewParams = getWebViewParams();
+  const startConversationalTimeoutRef = useRef<(() => void) | null>(null); // Function ref to avoid TDZ
+  
+  
+  // Sync ref with state to avoid TDZ issues in callbacks
+  useEffect(() => {
+    conversationalModeRef.current = conversationalMode;
+  }, [conversationalMode]);
   
   const chatContainerRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
@@ -70,14 +82,21 @@ export default function ChatPage() {
   // Flutter WebView-compatible voice recognition
   // Memoize voice callbacks to prevent infinite loops
   const handleVoiceResult = useCallback((text: string, isFinal: boolean) => {
+    console.log('🎤 [Chat] Voice result received:', { text, isFinal, inputValue });
     debugLog('voice', '[Chat] Voice result:', { text, isFinal });
-    if (isFinal) {
-      // Add final transcript to input value
-      setInputValue(prev => {
-        const newValue = prev + (prev ? ' ' : '') + text;
-        debugLog('voice', '[Chat] Updating input value:', newValue);
-        return newValue;
-      });
+    
+    // Reset conversational timeout on any voice input
+    // Use conversationalModeRef to avoid TDZ issues
+    if (conversationalModeRef.current && text.trim() && startConversationalTimeoutRef.current) {
+      debugLog('voice', '[Chat] Resetting conversational timeout due to voice input');
+      startConversationalTimeoutRef.current(); // This clears old timeout and starts new 20s countdown
+    }
+    
+    if (isFinal && text.trim()) {
+      // FORCE the text into input - clear first, then set
+      console.log('🎤 [Chat] Setting final transcript to input:', text);
+      setInputValue(text.trim());
+      
       // Trigger haptic feedback in WebView
       if (isWebView) {
         triggerHaptic('light');
@@ -98,8 +117,8 @@ export default function ChatPage() {
       // For WebView with permission issues, show a helpful message
       debugLog('voice', '[Chat] Microphone permission issue in WebView');
       toast({
-        title: "Voice Input Unavailable",
-        description: "Please type your message instead. Voice input requires app permissions.",
+        title: "Microphone Unavailable",
+        description: "Please type your message instead. Microphone requires app permissions.",
         variant: "default"
       });
       // Disable voice input for this session to avoid repeated errors
@@ -130,7 +149,131 @@ export default function ChatPage() {
   const handleVoiceEnd = useCallback(() => {
     debugLog('voice', '[Chat] Voice input ended');
     setVoiceInputActive(false);
+    
+    // If in conversational mode, add delay before allowing next speech session
+    // to prevent conflicts with TTS playback
+    if (conversationalModeRef.current && isWebView) {
+      debugLog('voice', '[Chat] Voice ended in conversational mode - adding TTS buffer delay');
+      // Add a longer delay to account for AI response and TTS playback
+      setTimeout(() => {
+        debugLog('voice', '[Chat] TTS buffer delay completed, ready for next speech');
+      }, 2000);
+    }
+  }, [isWebView]);
+
+  // Start 20-second timeout for conversational mode
+  const startConversationalTimeout = useCallback(() => {
+    // Clear any existing timeout
+    if (conversationalTimeoutRef.current) {
+      clearTimeout(conversationalTimeoutRef.current);
+    }
+    
+    conversationalTimeoutRef.current = setTimeout(() => {
+      debugLog('voice', '[Chat] Conversational mode timeout - auto-deactivating');
+      
+      // Turn off conversational mode
+      setConversationalMode(prev => {
+        if (prev) {
+          // Send native toggle command
+          if (isWebView && (window as any).webkit?.messageHandlers?.speechBridge) {
+            try {
+              (window as any).webkit.messageHandlers.speechBridge.postMessage({
+                command: 'toggleConversationalMode'
+              });
+            } catch (error) {
+              debugLog('voice', '[Chat] Error toggling conversational mode off:', error);
+            }
+          }
+          
+          setInputValue(''); // Clear input form
+          
+          // Reset toggle debounce to allow immediate reactivation
+          conversationalToggleRef.current = false;
+          
+          // Show notification
+          toast({
+            title: "Voice Mode Paused",
+            description: "No speech detected for 25 seconds. Tap mic to resume.",
+            variant: "default"
+          });
+        }
+        return false;
+      });
+    }, 25000); // Increased to 25 seconds to avoid conflicts with 30s speech timeout
+  }, [isWebView, toast, setInputValue]);
+  
+  // Sync function ref to avoid TDZ issues
+  useEffect(() => {
+    startConversationalTimeoutRef.current = startConversationalTimeout;
+  }, [startConversationalTimeout]);
+
+  // Reset/clear timeout
+  const resetConversationalTimeout = useCallback(() => {
+    if (conversationalTimeoutRef.current) {
+      clearTimeout(conversationalTimeoutRef.current);
+      conversationalTimeoutRef.current = null;
+    }
   }, []);
+
+  // Function to toggle conversational mode using native WebKit handler
+  const toggleConversationalMode = useCallback(() => {
+    // Prevent rapid double-clicking with shorter debounce
+    if (conversationalToggleRef.current) {
+      debugLog('voice', '[Chat] Ignoring conversational toggle - debounce active');
+      return;
+    }
+    
+    conversationalToggleRef.current = true;
+    
+    if (isWebView && (window as any).webkit?.messageHandlers?.speechBridge) {
+      debugLog('voice', '[Chat] Toggling conversational mode via native bridge');
+      try {
+        // Only send the toggle command to native - let iOS handle state management
+        (window as any).webkit.messageHandlers.speechBridge.postMessage({
+          command: 'toggleConversationalMode'
+        });
+        // Update local state to match
+        setConversationalMode(prev => {
+          const newMode = !prev;
+          debugLog('voice', `[Chat] Conversational mode ${newMode ? 'activated' : 'deactivated'} via button click`);
+          
+          if (newMode) {
+            // Starting conversational mode - start timeout
+            startConversationalTimeout();
+          } else {
+            // Stopping conversational mode - clear timeout and input
+            resetConversationalTimeout();
+            setInputValue(''); // Clear input form when manually deactivated
+            
+            // Show deactivation notification
+            toast({
+              title: "Conversational Mode Deactivated", 
+              description: "Voice mode turned off via button click.",
+              variant: "default"
+            });
+          }
+          return newMode;
+        });
+      } catch (error) {
+        debugLog('voice', '[Chat] Error toggling conversational mode:', error);
+      }
+    } else {
+      // Fallback for non-WebView environments
+      setConversationalMode(prev => {
+        const newMode = !prev;
+        if (!newMode) {
+          // Clear input when deactivating conversational mode
+          setInputValue('');
+        }
+        return newMode;
+      });
+    }
+    
+    // Very short debounce time for better responsiveness
+    setTimeout(() => {
+      conversationalToggleRef.current = false;
+    }, 500); // Further reduced to 500ms for faster response
+  }, [isWebView, startConversationalTimeout, resetConversationalTimeout, toast, setInputValue]);
 
   const voice = useFlutterWebViewVoice({
     onResult: handleVoiceResult,
@@ -151,7 +294,64 @@ export default function ChatPage() {
       hasWebkitSpeechRecognition: 'webkitSpeechRecognition' in window,
       userAgent: navigator.userAgent
     });
-  }, [voice.isWebView, voice.webViewInfo, voice.isSupported]);
+
+    // Add Flutter bridge handler for restarting speech after TTS
+    if (isWebView && (window as any).webkit?.messageHandlers?.speechBridge) {
+      console.log('🔗 [Chat] Setting up Flutter bridge handlers');
+      
+      // Expose function for Flutter to call
+      (window as any).restartSpeechFromFlutter = () => {
+        console.log('🔥 [Chat] Flutter called restartSpeechFromFlutter()');
+        if (conversationalMode) {
+          console.log('🔥 [Chat] In conversational mode, starting speech...');
+          voice.startListening();
+        } else {
+          console.log('🔥 [Chat] Not in conversational mode, toggling conversational mode...');
+          toggleConversationalMode();
+        }
+      };
+    }
+
+    // Test FlutterBridge availability and setup auto-trigger as fallback
+    if (isWebView) {
+      setTimeout(() => {
+        console.log('🔗 Testing FlutterBridge availability...');
+        console.log('window.FlutterBridge:', (window as any).FlutterBridge);
+        console.log('typeof FlutterBridge.send:', typeof (window as any).FlutterBridge?.send);
+        
+        // Expose a test function that can be called from Flutter console
+        (window as any).testVoiceButton = () => {
+          console.log('🎤 TEST: Voice button triggered via testVoiceButton()');
+          if ((window as any).FlutterBridge && typeof (window as any).FlutterBridge.send === 'function') {
+            console.log('🎤 TEST: Sending switch_to_voice to Flutter');
+            (window as any).FlutterBridge.send('switch_to_voice', {});
+          } else {
+            console.log('🎤 TEST: FlutterBridge not available');
+          }
+        };
+        
+        // Auto-trigger voice button after 5 seconds as iOS WebView fallback
+        (window as any).autoTriggerVoice = () => {
+          console.log('🎤 AUTO: Triggering voice button automatically');
+          if ((window as any).FlutterBridge && typeof (window as any).FlutterBridge.send === 'function') {
+            console.log('🎤 AUTO: Sending switch_to_voice to Flutter');
+            (window as any).FlutterBridge.send('switch_to_voice', {});
+          }
+        };
+        
+        console.log('🔗 Functions exposed: window.testVoiceButton() and window.autoTriggerVoice()');
+        console.log('🔗 Try double-tapping the blue microphone button, or wait for auto-trigger in 8 seconds');
+        
+        // Auto-trigger after 8 seconds if no user interaction
+        setTimeout(() => {
+          if (!(window as any).voiceButtonTriggered) {
+            console.log('🎤 No user interaction detected - auto-triggering voice button');
+            (window as any).autoTriggerVoice();
+          }
+        }, 8000);
+      }, 2000);
+    }
+  }, [voice.isWebView, voice.webViewInfo, voice.isSupported, isWebView, conversationalMode, voice.startListening, toggleConversationalMode]);
 
 
 
@@ -435,8 +635,46 @@ export default function ChatPage() {
       ];
       
       addMessagesWithDelay(welcomeMessages);
+    } else if (isWebView) {
+      // Create default scenario for Flutter WebView access when no scenario is set
+      const defaultScenario = {
+        title: "General Communication Practice",
+        description: "Practice your communication skills with the AI tutor",
+        prompt: "You are a helpful communication tutor. Help the user practice and improve their communication skills.",
+        entryPoint: "flutter_webview",
+        webviewParams: { userId, lessonId, courseId }
+      };
+      
+      setScenario(defaultScenario);
+      
+      const welcomeMessages = [
+        {
+          role: "assistant" as const,
+          content: "Hi! Welcome to your communication practice session.",
+          timestamp: new Date()
+        },
+        {
+          role: "assistant" as const,
+          content: "I'm here to help you practice and improve your communication skills.",
+          timestamp: new Date()
+        },
+        {
+          role: "assistant" as const,
+          content: "What would you like to work on today?",
+          timestamp: new Date()
+        }
+      ];
+      
+      addMessagesWithDelay(welcomeMessages);
     }
-  }, []);
+  }, [isWebView, userId, lessonId, courseId]);
+
+  // Cleanup timeout on unmount
+  useEffect(() => {
+    return () => {
+      resetConversationalTimeout();
+    };
+  }, [resetConversationalTimeout]);
 
   // Keyboard detection for input positioning (moved to state declarations above)
   
@@ -511,34 +749,52 @@ export default function ChatPage() {
 
   // Keyboard fallback detection also removed - fixed positioning handles this
 
-  // Enhanced scroll management with dynamic spacing awareness
+  // Enhanced scroll management - improved for longer content
   useEffect(() => {
     if (messages.length > 0 && chatContainerRef.current) {
       const container = chatContainerRef.current;
       
-      // Improved scroll to bottom function that accounts for spacer
-      const scrollToBottom = () => {
-        // Force scroll to absolute bottom to reveal all content
-        container.scrollTo({
-          top: container.scrollHeight,
-          behavior: 'smooth'
-        });
+      // Robust scroll to bottom function that handles longer content reliably
+      const scrollToBottomRobust = () => {
+        const scrollHeight = container.scrollHeight;
+        const clientHeight = container.clientHeight;
+        const maxScroll = scrollHeight - clientHeight;
         
-        debugLog('chat', 'Scroll to bottom triggered:', {
-          scrollHeight: container.scrollHeight,
-          clientHeight: container.clientHeight,
-          scrollTop: container.scrollTop,
+        // Use instant scroll for better reliability with long content
+        container.scrollTop = maxScroll;
+        
+        debugLog('chat', 'Robust autoscroll triggered:', {
+          scrollHeight,
+          clientHeight,
+          maxScroll,
+          finalScrollTop: container.scrollTop,
           inputPanelHeight: inputPanelHeight
         });
       };
       
-      // Immediate scroll for fast response
-      scrollToBottom();
+      // Multi-stage scroll approach for reliability with longer content
+      // Stage 1: Immediate scroll
+      scrollToBottomRobust();
       
-      // Additional scroll after content and spacer render
-      setTimeout(scrollToBottom, 200);
+      // Stage 2: After DOM updates and markdown rendering
+      requestAnimationFrame(() => {
+        setTimeout(scrollToBottomRobust, 150);
+      });
+      
+      // Stage 3: After images and complex content load
+      setTimeout(scrollToBottomRobust, 400);
+      
+      // Stage 4: Final scroll for very long content (backup)
+      setTimeout(scrollToBottomRobust, 800);
+      
+      // WebView native autoscroll compatibility
+      if (isWebView && (window as any).nativeAutoscroll) {
+        setTimeout(() => {
+          (window as any).nativeAutoscroll(true);
+        }, 200);
+      }
     }
-  }, [messages, inputPanelHeight]);
+  }, [messages, inputPanelHeight, isWebView]);
 
   // Simplified scroll management - remove keyboard-dependent logic
   // (No longer needed with sticky layout)
@@ -782,11 +1038,19 @@ export default function ChatPage() {
             <img 
               src={mrSmartImage} 
               alt="Mr. Smart"
-              className="w-12 h-12 rounded-full mr-3 object-cover"
+              className={`w-12 h-12 rounded-full mr-3 object-cover transition-all duration-300 ${
+                conversationalMode && isWebView 
+                  ? 'ring-2 ring-blue-500 ring-offset-2 shadow-lg shadow-blue-500/30 scale-105' 
+                  : ''
+              }`}
             />
             <div>
-              <h2 className="font-semibold text-base" style={{ color: '#1B1B1B' }}>Mr. Smart</h2>
-              <p className="text-sm text-gray-600">Communication tutor</p>
+              <h2 className={`font-semibold text-base transition-colors duration-300 ${
+                conversationalMode && isWebView ? 'text-blue-600' : 'text-[#1B1B1B]'
+              }`}>Mr. Smart</h2>
+              <p className={`text-sm transition-colors duration-300 ${
+                conversationalMode && isWebView ? 'text-blue-500' : 'text-gray-600'
+              }`}>Communication tutor</p>
             </div>
           </div>
           
@@ -868,8 +1132,8 @@ export default function ChatPage() {
             transition: 'bottom 0.2s ease-out'
           }}
         >
-        {/* Dynamic Suggestion Bubbles */}
-        {showSuggestions && dynamicSuggestions.length > 0 && (
+        {/* Dynamic Suggestion Bubbles - Hide when conversational mode is active */}
+        {showSuggestions && dynamicSuggestions.length > 0 && !(conversationalMode && isWebView) && (
           <div className="overflow-x-auto scrollbar-hide mb-1.5 pb-1">
             <div className="flex gap-2 min-w-max px-1">
               {dynamicSuggestions.map((suggestion, index) => (
@@ -926,91 +1190,7 @@ export default function ChatPage() {
         )}
 
         <div className="flex items-center space-x-2">
-          {/* Voice Input Button */}
-              {!voiceDisabledForSession && (
-              <Button
-                onClick={async () => {
-                  debugLog('voice', '[Chat] Microphone button clicked:', { isListening: voice.isListening, isSupported: voice.isSupported });
-                  
-                  if (!voice.isSupported || voiceDisabledForSession) {
-                    const message = voice.deviceInfo 
-                      ? `Voice input is not available on ${voice.deviceInfo.browser} for ${voice.deviceInfo.operatingSystem}. ${voice.deviceInfo.alternatives[0] || 'Please try a different browser.'}`
-                      : "Speech recognition is not supported in this browser environment. Try using Chrome, Edge, or Safari on the deployed version of the app.";
-                    
-                    toast({
-                      title: "Voice Input Not Available",
-                      description: message,
-                      variant: "destructive"
-                    });
-                    return;
-                  }
-                    
-                  if (voice.isListening) {
-                    debugLog('voice', '[Chat] Stopping voice input...');
-                    voice.stopListening();
-                  } else {
-                    debugLog('voice', '[Chat] Starting voice input...');
-                    
-                    // Don't request microphone permission separately in WebView to avoid crashes
-                    // The speech recognition API will handle it
-                    
-                    // Start listening with error handling
-                    try {
-                      await voice.startListening();
-                      debugLog('voice', '[Chat] Voice input started successfully');
-                    } catch (err) {
-                      debugLog('voice', '[Chat] Failed to start voice input:', err);
-                      // More graceful handling for WebView permission errors
-                      const errorStr = String(err);
-                      if (!voice.isWebView || (!errorStr.includes('permission') && !errorStr.includes('not-allowed'))) {
-                        toast({
-                          title: "Voice Input Error",
-                          description: voice.isWebView 
-                            ? "Please ensure microphone permissions are enabled in your app settings."
-                            : "Could not start voice input. Please check microphone permissions.",
-                          variant: "destructive"
-                        });
-                      }
-                    }
-                  }
-                }}
-                className={`rounded-xl transition-all ${
-                !voice.isSupported
-                  ? 'bg-gray-300 hover:bg-gray-400 cursor-not-allowed'
-                  : voice.deviceInfo?.browserSupport === 'partial'
-                    ? voice.isListening 
-                      ? 'bg-yellow-500 hover:bg-yellow-600 mic-recording' 
-                      : 'bg-yellow-100 hover:bg-yellow-200 border border-yellow-300'
-                    : voice.isListening 
-                      ? 'bg-red-500 hover:bg-red-600 mic-recording' 
-                      : 'bg-gray-100 hover:bg-gray-200'
-              }`}
-              style={{ 
-                width: '56px', 
-                height: '56px', 
-                padding: '0',
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-                opacity: !voice.isSupported ? 0.6 : 1
-              }}
-              disabled={sendMessageMutation.isPending}
-              type="button"
-              title={!voice.isSupported ? 'Voice input not available in this environment' : 'Voice input'}
-            >
-              {voice.isListening ? (
-                <MicOff 
-                  className="h-5 w-5" 
-                  style={{ color: '#FFFFFF' }}
-                />
-              ) : (
-                <Mic 
-                  className="h-5 w-5" 
-                  style={{ color: !voice.isSupported ? '#6B7280' : '#1B1B1B' }}
-                />
-              )}
-            </Button>
-            )}
+          {/* Voice button will be overlaid by Flutter - no web button needed */}
           
           <div className="flex-1 relative">
             <Input
@@ -1018,7 +1198,7 @@ export default function ChatPage() {
               id="chat-message-input"
               name="message"
               type="text"
-              placeholder={voice.isListening ? "Listening..." : "Type something"}
+              placeholder={voice.isListening ? "🎤 Listening... Speak clearly" : "Type something"}
               value={inputValue + (voice.isListening && voice.interimTranscript ? ' ' + voice.interimTranscript : '')}
               onChange={(e) => {
                 setInputValue(e.target.value);
@@ -1046,8 +1226,10 @@ export default function ChatPage() {
               }}
               className={`w-full px-4 bg-gray-100 rounded-2xl border-2 transition-all ${
                 voice.isListening 
-                  ? 'border-red-400 bg-red-50' 
-                  : 'border-transparent focus:border-primary'
+                  ? 'border-blue-400 bg-blue-50 text-blue-600' 
+                  : conversationalMode && isWebView
+                    ? 'border-blue-500 focus:border-blue-600 text-blue-600'
+                    : 'border-transparent focus:border-primary text-gray-900'
               }`}
               style={{ height: '56px' }}
               disabled={sendMessageMutation.isPending || voice.isListening}
@@ -1056,13 +1238,21 @@ export default function ChatPage() {
               enterKeyHint="send"
               aria-label="Chat message input"
             />
-            {/* Voice recording indicator */}
+            {/* Enhanced Voice Volume Level Indicator with Status */}
             {voice.isListening && (
               <div className="absolute right-3 top-1/2 transform -translate-y-1/2">
-                <div className="flex space-x-1">
-                  <span className="block w-1 h-4 bg-red-500 rounded-full animate-pulse"></span>
-                  <span className="block w-1 h-4 bg-red-500 rounded-full animate-pulse" style={{ animationDelay: '0.2s' }}></span>
-                  <span className="block w-1 h-4 bg-red-500 rounded-full animate-pulse" style={{ animationDelay: '0.4s' }}></span>
+                <div className="flex items-end space-x-1">
+                  <span className="block w-2 h-4 bg-gradient-to-t from-blue-500 to-blue-400 rounded-full voice-volume-low shadow-lg"></span>
+                  <span className="block w-2 h-6 bg-gradient-to-t from-blue-500 to-blue-400 rounded-full voice-volume-indicator shadow-lg" style={{ animationDelay: '0.1s' }}></span>
+                  <span className="block w-2 h-8 bg-gradient-to-t from-blue-500 to-blue-600 rounded-full voice-volume-high shadow-lg" style={{ animationDelay: '0.2s' }}></span>
+                  <span className="block w-2 h-10 bg-gradient-to-t from-blue-500 to-blue-600 rounded-full voice-volume-high shadow-lg" style={{ animationDelay: '0.25s' }}></span>
+                  <span className="block w-2 h-8 bg-gradient-to-t from-blue-500 to-blue-600 rounded-full voice-volume-high shadow-lg" style={{ animationDelay: '0.3s' }}></span>
+                  <span className="block w-2 h-6 bg-gradient-to-t from-blue-500 to-blue-400 rounded-full voice-volume-indicator shadow-lg" style={{ animationDelay: '0.35s' }}></span>
+                  <span className="block w-2 h-4 bg-gradient-to-t from-blue-500 to-blue-400 rounded-full voice-volume-low shadow-lg" style={{ animationDelay: '0.4s' }}></span>
+                </div>
+                {/* Listening status tooltip */}
+                <div className="absolute -top-8 left-1/2 transform -translate-x-1/2 bg-blue-600 text-white text-xs px-2 py-1 rounded shadow-lg whitespace-nowrap">
+                  {voice.interimTranscript ? "Processing..." : "Listening"}
                 </div>
               </div>
             )}
@@ -1091,6 +1281,7 @@ export default function ChatPage() {
         </div>
         </div>
       )}
+
     </div>
   );
 }

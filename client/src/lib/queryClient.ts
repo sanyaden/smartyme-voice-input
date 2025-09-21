@@ -18,6 +18,7 @@ export async function apiRequest(method: string, endpoint: string, body?: any, o
     ...options,
     headers: {
       "Content-Type": "application/json",
+      "x-api-key": "flutter-app-secure-key", // Authentication for API endpoints
       ...options?.headers,
     },
   });

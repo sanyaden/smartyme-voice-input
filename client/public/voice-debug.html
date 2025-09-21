@@ -1,0 +1,290 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Voice Debug</title>
+    <style>
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, sans-serif;
+            padding: 20px;
+            margin: 0;
+            background: #f5f5f5;
+        }
+        .status-box {
+            background: white;
+            border-radius: 12px;
+            padding: 20px;
+            margin: 10px 0;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+        }
+        .status-item {
+            display: flex;
+            justify-content: space-between;
+            padding: 8px 0;
+            border-bottom: 1px solid #eee;
+        }
+        .status-label {
+            font-weight: 600;
+            color: #333;
+        }
+        .status-value {
+            color: #666;
+            font-family: monospace;
+        }
+        .true { color: green; font-weight: bold; }
+        .false { color: red; font-weight: bold; }
+        .button-group {
+            display: flex;
+            gap: 10px;
+            margin: 20px 0;
+        }
+        button {
+            flex: 1;
+            padding: 15px;
+            font-size: 16px;
+            font-weight: 600;
+            border: none;
+            border-radius: 10px;
+            background: #007bff;
+            color: white;
+            cursor: pointer;
+        }
+        button:active {
+            transform: scale(0.95);
+        }
+        #transcript {
+            background: #fffbe6;
+            border: 2px solid #ffd700;
+            border-radius: 10px;
+            padding: 20px;
+            min-height: 60px;
+            font-size: 18px;
+            margin: 20px 0;
+        }
+        #log {
+            background: #000;
+            color: #0f0;
+            padding: 15px;
+            border-radius: 10px;
+            font-family: monospace;
+            font-size: 12px;
+            max-height: 300px;
+            overflow-y: auto;
+            white-space: pre-wrap;
+        }
+        .recording {
+            animation: pulse 1s infinite;
+        }
+        @keyframes pulse {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.6; }
+        }
+    </style>
+</head>
+<body>
+    <h1>🎤 Voice Input Debug</h1>
+    
+    <div class="status-box">
+        <h3>Bridge Status</h3>
+        <div class="status-item">
+            <span class="status-label">window.webkit:</span>
+            <span class="status-value" id="hasWebkit">checking...</span>
+        </div>
+        <div class="status-item">
+            <span class="status-label">messageHandlers:</span>
+            <span class="status-value" id="hasHandlers">checking...</span>
+        </div>
+        <div class="status-item">
+            <span class="status-label">speechBridge:</span>
+            <span class="status-value" id="hasBridge">checking...</span>
+        </div>
+        <div class="status-item">
+            <span class="status-label">nativeSpeech:</span>
+            <span class="status-value" id="hasNative">checking...</span>
+        </div>
+        <div class="status-item">
+            <span class="status-label">Callbacks Set:</span>
+            <span class="status-value" id="callbacksSet">false</span>
+        </div>
+        <div class="status-item">
+            <span class="status-label">Recording:</span>
+            <span class="status-value" id="isRecording">false</span>
+        </div>
+    </div>
+    
+    <div id="transcript">
+        <div style="color: #999;">Waiting to start...</div>
+    </div>
+    
+    <div class="button-group">
+        <button onclick="initCallbacks()">1. Init Callbacks</button>
+        <button onclick="startRecording()">2. Start</button>
+        <button onclick="stopRecording()">3. Stop</button>
+    </div>
+    
+    <div id="log"></div>
+    
+    <script>
+        // Global debug log
+        window.debugLog = [];
+        
+        function log(msg) {
+            const time = new Date().toLocaleTimeString();
+            const entry = `[${time}] ${msg}`;
+            window.debugLog.push(entry);
+            
+            const logEl = document.getElementById('log');
+            if (logEl) {
+                logEl.textContent = window.debugLog.join('\n');
+                logEl.scrollTop = logEl.scrollHeight;
+            }
+            
+            // Also log to console
+            console.log(msg);
+        }
+        
+        function updateStatus() {
+            // Check what's available
+            const hasWebkit = !!window.webkit;
+            const hasHandlers = !!(window.webkit && window.webkit.messageHandlers);
+            const hasBridge = !!(window.webkit && window.webkit.messageHandlers && window.webkit.messageHandlers.speechBridge);
+            const hasNative = !!window.nativeSpeech;
+            
+            // Update display
+            document.getElementById('hasWebkit').textContent = hasWebkit;
+            document.getElementById('hasWebkit').className = hasWebkit ? 'status-value true' : 'status-value false';
+            
+            document.getElementById('hasHandlers').textContent = hasHandlers;
+            document.getElementById('hasHandlers').className = hasHandlers ? 'status-value true' : 'status-value false';
+            
+            document.getElementById('hasBridge').textContent = hasBridge;
+            document.getElementById('hasBridge').className = hasBridge ? 'status-value true' : 'status-value false';
+            
+            document.getElementById('hasNative').textContent = hasNative;
+            document.getElementById('hasNative').className = hasNative ? 'status-value true' : 'status-value false';
+            
+            // Check callbacks
+            if (hasNative) {
+                const hasCallbacks = !!(window.nativeSpeech.onResult);
+                document.getElementById('callbacksSet').textContent = hasCallbacks;
+                document.getElementById('callbacksSet').className = hasCallbacks ? 'status-value true' : 'status-value false';
+            }
+            
+            return { hasWebkit, hasHandlers, hasBridge, hasNative };
+        }
+        
+        function initCallbacks() {
+            log('Initializing callbacks...');
+            
+            if (!window.nativeSpeech) {
+                log('ERROR: window.nativeSpeech not found!');
+                updateStatus();
+                return;
+            }
+            
+            // Set up all callbacks
+            window.nativeSpeech.onStart = function() {
+                log('✅ CALLBACK FIRED: onStart');
+                document.getElementById('isRecording').textContent = 'true';
+                document.getElementById('isRecording').className = 'status-value true';
+                document.getElementById('transcript').innerHTML = '<div class="recording">🔴 Listening...</div>';
+            };
+            
+            window.nativeSpeech.onEnd = function() {
+                log('✅ CALLBACK FIRED: onEnd');
+                document.getElementById('isRecording').textContent = 'false';
+                document.getElementById('isRecording').className = 'status-value false';
+            };
+            
+            window.nativeSpeech.onResult = function(text, isFinal) {
+                log(`✅ CALLBACK FIRED: onResult("${text}", isFinal=${isFinal})`);
+                const prefix = isFinal ? '✓ Final' : '... Interim';
+                document.getElementById('transcript').innerHTML = 
+                    `<div style="color: ${isFinal ? 'green' : 'blue'};">${prefix}: ${text}</div>`;
+            };
+            
+            window.nativeSpeech.onError = function(error) {
+                log(`❌ CALLBACK FIRED: onError("${error}")`);
+                document.getElementById('transcript').innerHTML = 
+                    `<div style="color: red;">Error: ${error}</div>`;
+            };
+            
+            window.nativeSpeech.onStatus = function(status) {
+                log(`📊 CALLBACK FIRED: onStatus("${status}")`);
+            };
+            
+            log('All callbacks registered');
+            updateStatus();
+            
+            // Verify they're actually set
+            log('Verification:');
+            log('  onStart = ' + (typeof window.nativeSpeech.onStart));
+            log('  onEnd = ' + (typeof window.nativeSpeech.onEnd));
+            log('  onResult = ' + (typeof window.nativeSpeech.onResult));
+            log('  onError = ' + (typeof window.nativeSpeech.onError));
+            log('  onStatus = ' + (typeof window.nativeSpeech.onStatus));
+        }
+        
+        function startRecording() {
+            log('Starting recording...');
+            
+            if (!window.nativeSpeech) {
+                log('ERROR: nativeSpeech not available');
+                return;
+            }
+            
+            if (!window.nativeSpeech.onResult) {
+                log('WARNING: Callbacks not set, initializing now...');
+                initCallbacks();
+            }
+            
+            try {
+                window.nativeSpeech.start();
+                log('Start command sent successfully');
+            } catch (e) {
+                log('ERROR: ' + e.toString());
+            }
+        }
+        
+        function stopRecording() {
+            log('Stopping recording...');
+            
+            if (!window.nativeSpeech) {
+                log('ERROR: nativeSpeech not available');
+                return;
+            }
+            
+            try {
+                window.nativeSpeech.stop();
+                log('Stop command sent successfully');
+            } catch (e) {
+                log('ERROR: ' + e.toString());
+            }
+        }
+        
+        // Check status on load
+        window.addEventListener('load', function() {
+            log('Page loaded, checking environment...');
+            const status = updateStatus();
+            log('Environment: ' + JSON.stringify(status));
+            
+            // Auto-init if bridge is available
+            if (status.hasNative) {
+                log('Native speech detected, auto-initializing callbacks...');
+                setTimeout(initCallbacks, 500);
+            }
+        });
+        
+        // Also check after a delay
+        setTimeout(function() {
+            log('Rechecking after delay...');
+            const status = updateStatus();
+            if (status.hasNative && !window.nativeSpeech.onResult) {
+                log('Native speech found after delay, initializing...');
+                initCallbacks();
+            }
+        }, 1500);
+    </script>
+</body>
+</html>

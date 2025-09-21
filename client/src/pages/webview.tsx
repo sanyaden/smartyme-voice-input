@@ -1,7 +1,7 @@
 import { useLocation } from "wouter";
 import { useQuery } from "@tanstack/react-query";
 import { useState, useEffect } from "react";
-import { AlertCircle } from "lucide-react";
+import { AlertCircle, Mic } from "lucide-react";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import ChatBubble from "@/components/ChatBubble";
@@ -10,6 +10,7 @@ import { usePageTitle } from "@/hooks/use-page-title";
 import { resolveLessonId, detectLessonIdFormat, mapLongIdToShortId } from "@/lib/lesson-mapping";
 import type { Lesson } from "../lib/lessons";
 import { mrSmartImage, getScenarioImage } from "@/lib/assets";
+import VoiceTutor from "@/components/VoiceTutor";
 
 // Helper function to infer lesson title from lesson ID
 function inferLessonTitleFromId(lessonId: string): string {
@@ -80,6 +81,7 @@ export default function WebViewPage() {
   // Parse URL parameters
   const [params, setParams] = useState<WebViewParams>({});
   const [paramErrors, setParamErrors] = useState<string[]>([]);
+  const [showVoiceTutor, setShowVoiceTutor] = useState(false);
 
   useEffect(() => {
     const urlParams = new URLSearchParams(window.location.search);
@@ -288,6 +290,29 @@ export default function WebViewPage() {
         ))}
       </div>
 
+      {/* Floating Voice Tutor Button */}
+      {!showVoiceTutor && (
+        <Button
+          onClick={() => setShowVoiceTutor(true)}
+          className="fixed bottom-6 right-6 w-16 h-16 rounded-full shadow-lg bg-blue-600 hover:bg-blue-700 z-10"
+          size="lg"
+        >
+          <Mic className="w-6 h-6" />
+        </Button>
+      )}
+
+      {/* Voice Tutor Modal/Overlay */}
+      {showVoiceTutor && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-20 p-4">
+          <div className="w-full max-w-md">
+            <VoiceTutor
+              userId={params.user_id || undefined}
+              lessonId={params.lesson_id || undefined}
+              onClose={() => setShowVoiceTutor(false)}
+            />
+          </div>
+        </div>
+      )}
 
     </div>
   );

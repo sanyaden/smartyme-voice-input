@@ -1,0 +1,171 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Debug Panel</title>
+    <style>
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, sans-serif;
+            padding: 10px;
+            margin: 0;
+        }
+        #debugPanel {
+            position: fixed;
+            top: 10px;
+            left: 10px;
+            right: 10px;
+            background: rgba(0, 0, 0, 0.9);
+            color: #0f0;
+            padding: 10px;
+            border-radius: 10px;
+            font-family: monospace;
+            font-size: 11px;
+            max-height: 40vh;
+            overflow-y: auto;
+            z-index: 9999;
+        }
+        .log-entry {
+            margin: 2px 0;
+            word-wrap: break-word;
+        }
+        .log-time {
+            color: #888;
+        }
+        button {
+            font-size: 16px;
+            padding: 12px 20px;
+            margin: 5px;
+            border: none;
+            border-radius: 8px;
+            background: #007bff;
+            color: white;
+        }
+        #transcript {
+            margin-top: 50vh;
+            padding: 15px;
+            background: white;
+            border: 2px solid #007bff;
+            border-radius: 10px;
+            min-height: 50px;
+        }
+    </style>
+</head>
+<body>
+    <div id="debugPanel"></div>
+    
+    <div id="transcript">Transcript will appear here...</div>
+    
+    <button onclick="testBridge()">Test Bridge</button>
+    <button onclick="setupCallbacks()">Setup Callbacks</button>
+    <button onclick="startSpeech()">Start Speech</button>
+    <button onclick="stopSpeech()">Stop Speech</button>
+    
+    <script>
+        const debugPanel = document.getElementById('debugPanel');
+        const transcriptEl = document.getElementById('transcript');
+        
+        // Override console.log to show in debug panel
+        const originalLog = console.log;
+        console.log = function(...args) {
+            originalLog.apply(console, args);
+            addDebugLog(args.join(' '));
+        };
+        
+        function addDebugLog(msg) {
+            const time = new Date().toLocaleTimeString();
+            const entry = document.createElement('div');
+            entry.className = 'log-entry';
+            entry.innerHTML = `<span class="log-time">[${time}]</span> ${msg}`;
+            debugPanel.appendChild(entry);
+            debugPanel.scrollTop = debugPanel.scrollHeight;
+        }
+        
+        function testBridge() {
+            console.log('=== Testing Bridge ===');
+            console.log('webkit: ' + !!window.webkit);
+            console.log('messageHandlers: ' + !!(window.webkit && window.webkit.messageHandlers));
+            console.log('speechBridge: ' + !!(window.webkit && window.webkit.messageHandlers && window.webkit.messageHandlers.speechBridge));
+            console.log('nativeSpeech: ' + !!window.nativeSpeech);
+            
+            if (window.nativeSpeech) {
+                console.log('nativeSpeech properties:');
+                for (let key in window.nativeSpeech) {
+                    console.log('  ' + key + ': ' + typeof window.nativeSpeech[key]);
+                }
+            }
+        }
+        
+        function setupCallbacks() {
+            console.log('=== Setting up callbacks ===');
+            
+            if (!window.nativeSpeech) {
+                console.log('ERROR: nativeSpeech not found!');
+                return;
+            }
+            
+            window.nativeSpeech.onStart = function() {
+                console.log('✅ CALLBACK: onStart fired!');
+                transcriptEl.textContent = 'Listening...';
+            };
+            
+            window.nativeSpeech.onEnd = function() {
+                console.log('✅ CALLBACK: onEnd fired!');
+            };
+            
+            window.nativeSpeech.onResult = function(text, isFinal) {
+                console.log(`✅ CALLBACK: onResult("${text}", ${isFinal})`);
+                transcriptEl.textContent = (isFinal ? 'Final: ' : 'Interim: ') + text;
+            };
+            
+            window.nativeSpeech.onError = function(error) {
+                console.log('❌ CALLBACK: onError - ' + error);
+                transcriptEl.textContent = 'Error: ' + error;
+            };
+            
+            window.nativeSpeech.onStatus = function(status) {
+                console.log('📊 CALLBACK: onStatus - ' + status);
+            };
+            
+            console.log('Callbacks configured');
+            
+            // Verify they're set
+            console.log('Verification:');
+            console.log('  onStart: ' + (window.nativeSpeech.onStart ? 'SET' : 'NULL'));
+            console.log('  onEnd: ' + (window.nativeSpeech.onEnd ? 'SET' : 'NULL'));
+            console.log('  onResult: ' + (window.nativeSpeech.onResult ? 'SET' : 'NULL'));
+            console.log('  onError: ' + (window.nativeSpeech.onError ? 'SET' : 'NULL'));
+            console.log('  onStatus: ' + (window.nativeSpeech.onStatus ? 'SET' : 'NULL'));
+        }
+        
+        function startSpeech() {
+            console.log('=== Starting speech ===');
+            if (window.nativeSpeech && window.nativeSpeech.start) {
+                window.nativeSpeech.start();
+                console.log('Start command sent');
+            } else {
+                console.log('ERROR: nativeSpeech.start not available');
+            }
+        }
+        
+        function stopSpeech() {
+            console.log('=== Stopping speech ===');
+            if (window.nativeSpeech && window.nativeSpeech.stop) {
+                window.nativeSpeech.stop();
+                console.log('Stop command sent');
+            } else {
+                console.log('ERROR: nativeSpeech.stop not available');
+            }
+        }
+        
+        // Auto-run on load
+        window.addEventListener('load', function() {
+            console.log('=== Page loaded ===');
+            setTimeout(function() {
+                testBridge();
+                setupCallbacks();
+            }, 500);
+        });
+    </script>
+</body>
+</html>

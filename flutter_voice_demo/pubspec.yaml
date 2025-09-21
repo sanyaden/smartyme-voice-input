@@ -1,0 +1,29 @@
+name: pure_flutter_voice_demo
+description: "Pure Flutter Voice Chat Demo - No Native Code Required"
+
+publish_to: none
+
+version: 1.0.0+1
+
+environment:
+  sdk: '>=3.4.3 <4.0.0'
+
+dependencies:
+  flutter:
+    sdk: flutter
+
+  # Pure Flutter voice dependencies (no native code needed)
+  speech_to_text: ^6.6.2
+  flutter_tts: ^4.1.0
+  
+  # WebView integration
+  flutter_inappwebview: ^6.1.5
+  
+  # Permissions
+  permission_handler: ^11.4.0
+
+dev_dependencies:
+  flutter_lints: ^5.0.0
+
+flutter:
+  uses-material-design: true

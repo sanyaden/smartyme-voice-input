@@ -1,0 +1,11 @@
+--- ../mega-app/ios/Runner/Info.plist	2025-08-11 20:39:32.787102343 +0300
++++ mega-app-with-mic/ios/Runner/Info.plist	2025-08-21 20:40:23.255793842 +0300
+@@ -66,6 +66,8 @@
+ 	<true/>
+ 	<key>NSUserTrackingUsageDescription</key>
+ 	<string>This identifier will be used to deliver personalized ads to you.</string>
++	<key>NSMicrophoneUsageDescription</key>
++	<string>This app needs access to the microphone for voice input in chat conversations.</string>
+ 	<key>RetenoAccessKey</key>
+ 	<string>$(RETENO_ACCESS_KEY)</string>
+ 	<key>UIApplicationSupportsIndirectInputEvents</key>

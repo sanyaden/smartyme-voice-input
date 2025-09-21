@@ -144,7 +144,7 @@ export function FlutterWebViewVoiceInput({
           <AlertDescription>
             <div className="space-y-2">
               <p className="text-sm text-yellow-800">
-                Voice input is having issues. You can type your message instead.
+                Microphone is having issues. You can type your message instead.
               </p>
               {voice.isWebView && voice.webViewInfo?.platform === 'ios' && (
                 <p className="text-xs text-yellow-700">
@@ -199,7 +199,7 @@ export function FlutterWebViewVoiceInput({
                 "transition-all",
                 voice.isListening && "animate-pulse"
               )}
-              title={voice.isListening ? "Stop listening" : "Start voice input"}
+              title={voice.isListening ? "Stop listening" : "Start microphone"}
             >
               {voice.isListening ? (
                 <MicOff className="h-4 w-4" />
@@ -214,7 +214,7 @@ export function FlutterWebViewVoiceInput({
               size="icon"
               onClick={() => inputMode === 'keyboard' && voice.isSupported ? switchToVoice() : undefined}
               disabled={disabled || !voice.isSupported}
-              title={voice.isSupported ? "Switch to voice input" : "Voice not available"}
+              title={voice.isSupported ? "Switch to microphone" : "Microphone not available"}
             >
               <Keyboard className="h-4 w-4" />
             </Button>
@@ -228,7 +228,7 @@ export function FlutterWebViewVoiceInput({
               size="icon"
               className="h-6 w-10"
               onClick={inputMode === 'voice' ? switchToKeyboard : switchToVoice}
-              title={inputMode === 'voice' ? "Switch to keyboard" : "Switch to voice"}
+              title={inputMode === 'voice' ? "Switch to keyboard" : "Switch to microphone"}
             >
               {inputMode === 'voice' ? (
                 <Keyboard className="h-3 w-3" />
@@ -272,7 +272,7 @@ export function FlutterWebViewVoiceInput({
           {inputMode === 'voice' && voice.isSupported ? (
             <span className="flex items-center space-x-1">
               <Check className="h-3 w-3 text-green-500" />
-              <span>Voice active</span>
+              <span>Microphone active</span>
             </span>
           ) : (
             <span className="flex items-center space-x-1">
@@ -287,7 +287,7 @@ export function FlutterWebViewVoiceInput({
             onClick={voice.resetTranscript}
             className="text-blue-600 hover:text-blue-800"
           >
-            Clear voice text
+            Clear microphone text
           </button>
         )}
       </div>
