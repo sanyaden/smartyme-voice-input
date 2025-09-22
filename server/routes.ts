@@ -59,17 +59,19 @@ const elevenlabs = new ElevenLabsClient({
   apiKey: process.env.ELEVENLABS_API_KEY
 });
 
-// Hume AI Configuration
+// Hume AI EVI Configuration
 const HUME_AI_API_KEY = process.env.HUME_AI_API_KEY;
 const HUME_AI_SECRET_KEY = process.env.HUME_AI_SECRET_KEY;
-const HUME_AI_BASE_URL = 'https://api.hume.ai/v0';
+const HUME_EVI_BASE_URL = 'wss://api.hume.ai/v0/evi/chat';
 
-// Store active Hume AI WebSocket connections
-const humeConnections = new Map<string, {
+// Store active Hume AI EVI WebSocket connections
+const humeEVIConnections = new Map<string, {
   ws: WebSocket;
   userId: string;
+  sessionId: string;
   connected: boolean;
   startTime: number;
+  clientWs?: any; // Client WebSocket connection
 }>();
 
 // Retry logic with exponential backoff
@@ -228,13 +230,13 @@ export async function registerRoutes(app: Express): Promise<Server> {
     res.json({
       status: 'Hume AI service running',
       hasApiKey: !!HUME_AI_API_KEY,
-      activeConnections: humeConnections.size,
+      activeConnections: humeEVIConnections.size,
       timestamp: Date.now()
     });
   });
 
   app.get("/api/hume-ai/status", (req, res) => {
-    const connections = Array.from(humeConnections.entries()).map(([sessionId, conn]) => ({
+    const connections = Array.from(humeEVIConnections.entries()).map(([sessionId, conn]) => ({
       sessionId,
       userId: conn.userId,
       connected: conn.connected,
@@ -242,7 +244,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }));
     
     res.json({
-      totalConnections: humeConnections.size,
+      totalConnections: humeEVIConnections.size,
       connections,
       timestamp: Date.now()
     });
@@ -257,10 +259,11 @@ export async function registerRoutes(app: Express): Promise<Server> {
       
       console.log(`🎭 Creating HTTP session for Hume AI: ${finalSessionId}`);
       
-      // Create session entry
-      humeConnections.set(finalSessionId, {
+      // Create session entry (HTTP fallback mode)
+      humeEVIConnections.set(finalSessionId, {
         ws: null as any, // HTTP session doesn't have WebSocket
         userId: finalUserId,
+        sessionId: finalSessionId,
         connected: true,
         startTime: Date.now()
       });
@@ -325,8 +328,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
     try {
       const { sessionId } = req.params;
       
-      if (humeConnections.has(sessionId)) {
-        humeConnections.delete(sessionId);
+      if (humeEVIConnections.has(sessionId)) {
+        humeEVIConnections.delete(sessionId);
         console.log(`🎭 HTTP session deleted: ${sessionId}`);
         res.json({ message: 'Session deleted successfully', sessionId });
       } else {
@@ -1458,99 +1461,222 @@ function handleHumeAIWebSocket(ws: WebSocket, request: any) {
   const sessionId = url.searchParams.get('sessionId') || `hume_${Date.now()}`;
   const userId = url.searchParams.get('userId') || 'anonymous';
   
-  console.log(`🎭 Hume AI connection established: ${sessionId}`);
+  console.log(`🎭 Hume AI EVI connection established: ${sessionId}`);
   
-  // Store connection
-  humeConnections.set(sessionId, {
-    ws,
-    userId,
-    connected: true,
-    startTime: Date.now()
-  });
-
-  // Send connection confirmation
-  ws.send(JSON.stringify({
-    type: 'connection_established',
-    sessionId,
-    userId,
-    timestamp: Date.now(),
-    status: 'connected'
-  }));
-
-  // Handle incoming messages
-  ws.on('message', async (data) => {
-    try {
-      const message = JSON.parse(data.toString());
-      
-      switch (message.type) {
-        case 'start_recording':
-          await handleHumeStartRecording(ws, sessionId, message);
-          break;
-          
-        case 'audio_data':
-          await handleHumeAudioData(ws, sessionId, message);
-          break;
-          
-        case 'stop_recording':
-          await handleHumeStopRecording(ws, sessionId, message);
-          break;
-          
-        case 'ping':
-          ws.send(JSON.stringify({
-            type: 'pong',
-            timestamp: Date.now()
-          }));
-          break;
-          
-        default:
-          console.log(`Unknown Hume AI message type: ${message.type}`);
-      }
-    } catch (error: any) {
-      console.error('Error processing Hume AI message:', error);
-      ws.send(JSON.stringify({
-        type: 'error',
-        error: error.message,
-        timestamp: Date.now()
-      }));
-    }
-  });
-
-  // Handle connection close
-  ws.on('close', () => {
-    console.log(`🎭 Hume AI connection closed: ${sessionId}`);
-    humeConnections.delete(sessionId);
-  });
-
-  // Handle connection error
-  ws.on('error', (error) => {
-    console.error(`🎭 Hume AI WebSocket error: ${error}`);
-    humeConnections.delete(sessionId);
-  });
+  // Connect to Hume AI EVI WebSocket
+  connectToHumeEVI(ws, sessionId, userId);
 }
 
-// Handle start recording request for Hume AI
-async function handleHumeStartRecording(ws: WebSocket, sessionId: string, message: any) {
+async function connectToHumeEVI(clientWs: WebSocket, sessionId: string, userId: string) {
   try {
-    console.log(`🎤 Starting Hume AI recording for session: ${sessionId}`);
-    
-    ws.send(JSON.stringify({
-      type: 'recording_started',
+    if (!HUME_AI_API_KEY) {
+      throw new Error('Hume AI API key not configured');
+    }
+
+    console.log(`🎭 Connecting to Hume AI EVI for session: ${sessionId}`);
+
+    // Create WebSocket connection to Hume AI EVI
+    const humeWs = new WebSocket(HUME_EVI_BASE_URL, {
+      headers: {
+        'X-Hume-Api-Key': HUME_AI_API_KEY,
+        'Sec-WebSocket-Protocol': 'hume-evi',
+      }
+    });
+
+    // Store the connection
+    humeEVIConnections.set(sessionId, {
+      ws: humeWs,
+      userId,
       sessionId,
-      timestamp: Date.now(),
-      status: 'Recording audio for emotion analysis...'
-    }));
-    
+      connected: false,
+      startTime: Date.now(),
+      clientWs
+    });
+
+    humeWs.on('open', () => {
+      console.log(`✅ Connected to Hume AI EVI: ${sessionId}`);
+      
+      // Update connection status
+      const connection = humeEVIConnections.get(sessionId);
+      if (connection) {
+        connection.connected = true;
+      }
+
+      // Send session settings to Hume AI EVI
+      humeWs.send(JSON.stringify({
+        type: 'session_settings',
+        session_settings: {
+          language: 'en',
+          voice: {
+            provider: 'HUME_AI',
+            name: 'sample_voice'
+          },
+          tools: [],
+          chat_group: {
+            start_new_chat: true
+          }
+        }
+      }));
+
+      // Notify client of successful connection
+      clientWs.send(JSON.stringify({
+        type: 'connection_established',
+        sessionId,
+        userId,
+        timestamp: Date.now(),
+        status: 'connected',
+        provider: 'hume_evi'
+      }));
+    });
+
+    humeWs.on('message', (data) => {
+      try {
+        const message = JSON.parse(data.toString());
+        console.log(`🎭 EVI message:`, message.type);
+        
+        // Forward EVI messages to client
+        clientWs.send(JSON.stringify({
+          type: 'evi_message',
+          data: message,
+          timestamp: Date.now()
+        }));
+
+        // Handle specific EVI message types
+        switch (message.type) {
+          case 'audio_output':
+            // Forward audio output to client
+            clientWs.send(JSON.stringify({
+              type: 'audio_output',
+              audioData: message.data,
+              timestamp: Date.now()
+            }));
+            break;
+            
+          case 'user_message':
+          case 'assistant_message':
+            // Forward conversation messages
+            clientWs.send(JSON.stringify({
+              type: 'conversation_message',
+              message: message,
+              timestamp: Date.now()
+            }));
+            break;
+        }
+      } catch (error) {
+        console.error('Error processing EVI message:', error);
+      }
+    });
+
+    humeWs.on('error', (error) => {
+      console.error(`❌ Hume AI EVI error for ${sessionId}:`, error);
+      clientWs.send(JSON.stringify({
+        type: 'error',
+        error: 'Hume AI EVI connection error',
+        details: error.message,
+        timestamp: Date.now()
+      }));
+    });
+
+    humeWs.on('close', () => {
+      console.log(`🎭 Hume AI EVI connection closed: ${sessionId}`);
+      humeEVIConnections.delete(sessionId);
+      
+      clientWs.send(JSON.stringify({
+        type: 'evi_disconnected',
+        sessionId,
+        timestamp: Date.now()
+      }));
+    });
+
+    // Handle client messages and forward to EVI
+    clientWs.on('message', async (data) => {
+      try {
+        const message = JSON.parse(data.toString());
+        
+        switch (message.type) {
+          case 'audio_input':
+            // Forward audio input to EVI
+            if (humeWs.readyState === WebSocket.OPEN) {
+              humeWs.send(JSON.stringify({
+                type: 'audio_input',
+                data: message.audioData
+              }));
+            }
+            break;
+            
+          case 'user_input':
+            // Forward text input to EVI
+            if (humeWs.readyState === WebSocket.OPEN) {
+              humeWs.send(JSON.stringify({
+                type: 'user_input',
+                text: message.text
+              }));
+            }
+            break;
+            
+          case 'ping':
+            clientWs.send(JSON.stringify({
+              type: 'pong',
+              timestamp: Date.now()
+            }));
+            break;
+        }
+      } catch (error: any) {
+        console.error('Error processing client message:', error);
+        clientWs.send(JSON.stringify({
+          type: 'error',
+          error: error.message,
+          timestamp: Date.now()
+        }));
+      }
+    });
+
+    // Handle client disconnect
+    clientWs.on('close', () => {
+      console.log(`🎭 Client disconnected: ${sessionId}`);
+      if (humeWs.readyState === WebSocket.OPEN) {
+        humeWs.close();
+      }
+      humeEVIConnections.delete(sessionId);
+    });
+
+    clientWs.on('error', (error) => {
+      console.error(`🎭 Client WebSocket error: ${error}`);
+      if (humeWs.readyState === WebSocket.OPEN) {
+        humeWs.close();
+      }
+      humeEVIConnections.delete(sessionId);
+    });
+
   } catch (error: any) {
-    console.error('Hume AI start recording error:', error);
-    ws.send(JSON.stringify({
+    console.error(`❌ Failed to connect to Hume AI EVI: ${error.message}`);
+    clientWs.send(JSON.stringify({
       type: 'error',
-      error: 'Failed to start recording',
+      error: 'Failed to connect to Hume AI EVI',
+      details: error.message,
       timestamp: Date.now()
     }));
   }
 }
 
-// Handle audio data for Hume AI emotion analysis
+// Cleanup old connections
+function cleanupEVIConnections() {
+  for (const [sessionId, connection] of humeEVIConnections.entries()) {
+    if (connection.ws.readyState === WebSocket.CLOSED) {
+      humeEVIConnections.delete(sessionId);
+    }
+  }
+}
+
+// Get available Hume AI EVI voices  
+function getHumeEVIVoices() {
+  return [
+    { id: 'sample_voice', name: 'Sample Voice', provider: 'HUME_AI' },
+    { id: 'evo_voice', name: 'Evo Voice', provider: 'HUME_AI' }
+  ];
+}
+
+// Legacy function placeholder - remove in next cleanup
 async function handleHumeAudioData(ws: WebSocket, sessionId: string, message: any) {
   try {
     const { audioData, format = 'webm' } = message;
