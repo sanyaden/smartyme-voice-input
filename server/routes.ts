@@ -250,75 +250,79 @@ export async function registerRoutes(app: Express): Promise<Server> {
     });
   });
 
-  // HTTP polling fallback for Google Cloud Run (WebSocket alternative)
+  // Hume AI EVI HTTP endpoints for compatibility
   app.post("/api/hume-ai/session", async (req, res) => {
     try {
       const { userId, sessionId } = req.body;
-      const finalSessionId = sessionId || `hume_http_${Date.now()}`;
+      const finalSessionId = sessionId || `hume_evi_${Date.now()}`;
       const finalUserId = userId || 'anonymous';
       
-      console.log(`🎭 Creating HTTP session for Hume AI: ${finalSessionId}`);
+      console.log(`🎭 Creating Hume AI EVI session: ${finalSessionId}`);
       
-      // Create session entry (HTTP fallback mode)
+      // Create session entry for EVI
       humeEVIConnections.set(finalSessionId, {
-        ws: null as any, // HTTP session doesn't have WebSocket
+        ws: null as any, // Will be set when WebSocket connects
         userId: finalUserId,
         sessionId: finalSessionId,
-        connected: true,
+        connected: false, // Will be true when WebSocket connects
         startTime: Date.now()
       });
       
       res.json({
         sessionId: finalSessionId,
         userId: finalUserId,
-        connected: true,
+        connected: false,
         timestamp: Date.now(),
-        message: 'HTTP session created successfully'
+        message: 'EVI session created. Connect via WebSocket for voice conversations.',
+        websocketUrl: `/api/hume-ai/connect?sessionId=${finalSessionId}&userId=${finalUserId}`
       });
       
     } catch (error: any) {
-      console.error('HTTP session creation error:', error);
+      console.error('EVI session creation error:', error);
       res.status(500).json({ error: error.message });
     }
   });
 
-  app.post("/api/hume-ai/analyze", async (req, res) => {
+  // EVI voice conversation endpoint (replaces emotion analysis)
+  app.post("/api/hume-ai/conversation", async (req, res) => {
     try {
-      const { sessionId, audioData, format = 'webm' } = req.body;
+      const { sessionId, text } = req.body;
       
-      if (!sessionId || !audioData) {
-        return res.status(400).json({ error: 'sessionId and audioData are required' });
+      if (!sessionId || !text) {
+        return res.status(400).json({ error: 'sessionId and text are required' });
       }
       
-      console.log(`🧠 HTTP emotion analysis for session: ${sessionId}`);
+      console.log(`🎭 EVI text conversation for session: ${sessionId}`);
       
-      // Convert base64 audio to buffer
-      const audioBuffer = Buffer.from(audioData, 'base64');
+      // Find EVI connection
+      const connection = humeEVIConnections.get(sessionId);
+      if (!connection) {
+        return res.status(404).json({ error: 'Session not found' });
+      }
       
-      // Analyze emotions (with fallback to simulation)
-      const emotions = await analyzeEmotionsWithHumeAI(audioBuffer, format);
-      
-      // Generate transcript (simulated for now)
-      const transcript = generateHumeTranscript();
-      
-      // Generate AI response based on emotions
-      const aiResponse = generateHumeEmotionResponse(emotions, transcript);
-      const topEmotion = getHumeTopEmotion(emotions);
-      
-      res.json({
-        sessionId,
-        emotions,
-        transcript,
-        aiResponse,
-        topEmotion,
-        timestamp: Date.now(),
-        status: 'success'
-      });
+      if (connection.ws && connection.ws.readyState === WebSocket.OPEN) {
+        // Send text to Hume AI EVI via WebSocket
+        connection.ws.send(JSON.stringify({
+          type: 'user_input',
+          text: text
+        }));
+        
+        res.json({
+          sessionId,
+          message: 'Text sent to EVI for processing',
+          timestamp: Date.now()
+        });
+      } else {
+        res.status(503).json({ 
+          error: 'EVI WebSocket not connected',
+          message: 'Please connect via WebSocket first'
+        });
+      }
       
     } catch (error: any) {
-      console.error('HTTP emotion analysis error:', error);
+      console.error('EVI conversation error:', error);
       res.status(500).json({ 
-        error: 'Emotion analysis failed',
+        error: 'EVI conversation failed',
         details: error.message 
       });
     }
@@ -328,16 +332,22 @@ export async function registerRoutes(app: Express): Promise<Server> {
     try {
       const { sessionId } = req.params;
       
-      if (humeEVIConnections.has(sessionId)) {
+      const connection = humeEVIConnections.get(sessionId);
+      if (connection) {
+        // Close EVI WebSocket if open
+        if (connection.ws && connection.ws.readyState === WebSocket.OPEN) {
+          connection.ws.close();
+        }
+        
         humeEVIConnections.delete(sessionId);
-        console.log(`🎭 HTTP session deleted: ${sessionId}`);
-        res.json({ message: 'Session deleted successfully', sessionId });
+        console.log(`🎭 EVI session deleted: ${sessionId}`);
+        res.json({ message: 'EVI session deleted successfully', sessionId });
       } else {
         res.status(404).json({ error: 'Session not found', sessionId });
       }
       
     } catch (error: any) {
-      console.error('HTTP session deletion error:', error);
+      console.error('EVI session deletion error:', error);
       res.status(500).json({ error: error.message });
     }
   });
@@ -1676,369 +1686,21 @@ function getHumeEVIVoices() {
   ];
 }
 
-// Legacy function placeholder - remove in next cleanup
-async function handleHumeAudioData(ws: WebSocket, sessionId: string, message: any) {
-  try {
-    const { audioData, format = 'webm' } = message;
-    
-    // Convert base64 audio to buffer
-    const audioBuffer = Buffer.from(audioData, 'base64');
-    
-    console.log(`🧠 Processing ${audioBuffer.length} bytes for emotion analysis`);
-    
-    // Analyze emotions (with fallback to simulation)
-    const emotions = await analyzeEmotionsWithHumeAI(audioBuffer, format);
-    
-    // Generate transcript (simulated for now)
-    const transcript = generateHumeTranscript();
-    
-    // Send results back to client
-    ws.send(JSON.stringify({
-      type: 'emotion_analysis',
-      sessionId,
-      emotions,
-      transcript,
-      timestamp: Date.now()
-    }));
-    
-    // Generate AI response based on emotions
-    const aiResponse = generateHumeEmotionResponse(emotions, transcript);
-    
-    ws.send(JSON.stringify({
-      type: 'ai_response',
-      sessionId,
-      response: aiResponse,
-      topEmotion: getHumeTopEmotion(emotions),
-      timestamp: Date.now()
-    }));
-    
-  } catch (error: any) {
-    console.error('Hume AI audio processing error:', error);
-    ws.send(JSON.stringify({
-      type: 'error',
-      error: 'Failed to process audio',
-      details: error.message,
-      timestamp: Date.now()
-    }));
-  }
-}
-
-// Handle stop recording request for Hume AI
-async function handleHumeStopRecording(ws: WebSocket, sessionId: string, message: any) {
-  try {
-    console.log(`🛑 Stopping Hume AI recording for session: ${sessionId}`);
-    
-    ws.send(JSON.stringify({
-      type: 'recording_stopped',
-      sessionId,
-      timestamp: Date.now(),
-      status: 'Recording completed. Processing emotions...'
-    }));
-    
-  } catch (error: any) {
-    console.error('Hume AI stop recording error:', error);
-    ws.send(JSON.stringify({
-      type: 'error',
-      error: 'Failed to stop recording',
-      timestamp: Date.now()
-    }));
-  }
-}
-
-// Analyze emotions using Hume AI API (with simulation fallback)
-async function analyzeEmotionsWithHumeAI(audioBuffer: Buffer, format: string) {
-  try {
-    if (!HUME_AI_API_KEY || !HUME_AI_SECRET_KEY) {
-      console.log('🎭 No Hume AI API credentials, using simulated emotions');
-      return generateHumeSimulatedEmotions();
-    }
-    
-    console.log('🎭 Calling real Hume AI API for emotion analysis...');
-    
-    // Create form data for Hume AI API
-    const FormData = require('form-data');
-    const form = new FormData();
-    
-    // Add audio file
-    form.append('file', audioBuffer, {
-      filename: `audio.${format}`,
-      contentType: getContentType(format)
-    });
-    
-    // Add models configuration
-    form.append('models', JSON.stringify({
-      prosody: {
-        identify_speakers: false,
-        granularity: "utterance"
-      }
-    }));
-    
-    // Call Hume AI Batch API
-    console.log('📤 Submitting job to Hume AI...');
-    const jobResponse = await axios.post(`${HUME_AI_BASE_URL}/batch/jobs`, form, {
-      headers: {
-        ...form.getHeaders(),
-        'X-Hume-Api-Key': HUME_AI_API_KEY
-      },
-      timeout: 30000
-    });
-    
-    const jobId = jobResponse.data.job_id;
-    console.log(`🔄 Hume AI job created: ${jobId}`);
-    
-    // Poll for results
-    const results = await pollForHumeResults(jobId);
-    
-    // Parse and return emotions
-    const emotions = parseHumeAIResults(results);
-    console.log(`✅ Hume AI analysis complete: ${Object.keys(emotions).length} emotions detected`);
-    
-    return emotions;
-    
-  } catch (error: any) {
-    console.error('Hume AI API error:', error.response?.data || error.message);
-    console.log('🎭 Falling back to simulated emotions');
-    // Fallback to simulated emotions
-    return generateHumeSimulatedEmotions();
-  }
-}
-
-// Get content type for audio format
-function getContentType(format: string): string {
-  const contentTypes: Record<string, string> = {
-    'mp3': 'audio/mpeg',
-    'wav': 'audio/wav',
-    'm4a': 'audio/mp4',
-    'aac': 'audio/aac',
-    'webm': 'audio/webm',
-    'ogg': 'audio/ogg'
-  };
-  return contentTypes[format] || 'audio/mpeg';
-}
-
-// Poll Hume AI job results
-async function pollForHumeResults(jobId: string, maxAttempts = 30): Promise<any> {
-  console.log(`🔄 Polling for Hume AI job results: ${jobId}`);
-  
-  for (let i = 0; i < maxAttempts; i++) {
-    try {
-      const response = await axios.get(`${HUME_AI_BASE_URL}/batch/jobs/${jobId}`, {
-        headers: {
-          'X-Hume-Api-Key': HUME_AI_API_KEY
-        },
-        timeout: 10000
-      });
-      
-      const state = response.data.state;
-      console.log(`🔄 Job ${jobId} state: ${state} (attempt ${i + 1}/${maxAttempts})`);
-      
-      if (state === 'COMPLETED') {
-        console.log(`✅ Job ${jobId} completed, fetching predictions...`);
-        
-        // Get predictions
-        const predictionsResponse = await axios.get(`${HUME_AI_BASE_URL}/batch/jobs/${jobId}/predictions`, {
-          headers: {
-            'X-Hume-Api-Key': HUME_AI_API_KEY
-          },
-          timeout: 10000
-        });
-        
-        return predictionsResponse.data;
-      }
-      
-      if (state === 'FAILED') {
-        throw new Error(`Hume AI job ${jobId} failed`);
-      }
-      
-      // Wait before next poll (start with 2s, increase gradually)
-      const delay = Math.min(2000 + (i * 1000), 10000);
-      await new Promise(resolve => setTimeout(resolve, delay));
-      
-    } catch (error: any) {
-      console.error(`Polling attempt ${i + 1} failed:`, error.message);
-      
-      if (i === maxAttempts - 1) {
-        throw new Error(`Hume AI job polling timeout after ${maxAttempts} attempts`);
-      }
-      
-      // Wait before retry
-      await new Promise(resolve => setTimeout(resolve, 2000));
+// Cleanup old EVI connections
+function cleanupEVIConnections() {
+  for (const [sessionId, connection] of humeEVIConnections.entries()) {
+    if (connection.ws && connection.ws.readyState === WebSocket.CLOSED) {
+      humeEVIConnections.delete(sessionId);
     }
   }
-  
-  throw new Error(`Hume AI job ${jobId} timeout after ${maxAttempts} attempts`);
 }
 
-// Parse Hume AI results into emotion scores
-function parseHumeAIResults(results: any): Record<string, number> {
-  try {
-    console.log('🔍 Parsing Hume AI results...');
-    
-    if (!results || !Array.isArray(results) || results.length === 0) {
-      console.log('⚠️ No results in response, using simulated emotions');
-      return generateHumeSimulatedEmotions();
-    }
-    
-    const firstResult = results[0];
-    const predictions = firstResult?.results?.predictions || [];
-    
-    if (predictions.length === 0) {
-      console.log('⚠️ No predictions in results, using simulated emotions');
-      return generateHumeSimulatedEmotions();
-    }
-    
-    const prosodyResults = predictions[0]?.models?.prosody?.grouped_predictions || [];
-    
-    if (prosodyResults.length === 0) {
-      console.log('⚠️ No prosody results, using simulated emotions');
-      return generateHumeSimulatedEmotions();
-    }
-    
-    const emotions: Record<string, number> = {};
-    const firstPrediction = prosodyResults[0]?.predictions?.[0];
-    
-    if (firstPrediction?.emotions && Array.isArray(firstPrediction.emotions)) {
-      firstPrediction.emotions.forEach((emotion: any) => {
-        if (emotion.name && typeof emotion.score === 'number') {
-          emotions[emotion.name] = emotion.score;
-        }
-      });
-      
-      console.log(`✅ Parsed ${Object.keys(emotions).length} emotions from Hume AI`);
-      return emotions;
-    }
-    
-    console.log('⚠️ No valid emotions in prediction, using simulated emotions');
-    return generateHumeSimulatedEmotions();
-    
-  } catch (error: any) {
-    console.error('Error parsing Hume AI results:', error);
-    console.log('🎭 Falling back to simulated emotions');
-    return generateHumeSimulatedEmotions();
-  }
-}
-
-// Generate simulated emotions for Hume AI demo
-function generateHumeSimulatedEmotions() {
-  const emotionCategories = [
-    'Admiration', 'Adoration', 'Aesthetic Appreciation', 'Amusement', 'Anger',
-    'Anxiety', 'Awe', 'Awkwardness', 'Boredom', 'Calmness',
-    'Concentration', 'Confusion', 'Contemplation', 'Contempt', 'Contentment',
-    'Craving', 'Desire', 'Determination', 'Disappointment', 'Disgust',
-    'Distress', 'Doubt', 'Ecstasy', 'Embarrassment', 'Empathic Pain',
-    'Entrancement', 'Envy', 'Excitement', 'Fear', 'Guilt',
-    'Horror', 'Interest', 'Joy', 'Love', 'Nostalgia',
-    'Pain', 'Pride', 'Realization', 'Relief', 'Romance',
-    'Sadness', 'Satisfaction', 'Shame', 'Surprise (negative)', 'Surprise (positive)',
-    'Sympathy', 'Tiredness', 'Triumph'
+// Get available Hume AI EVI voices  
+function getHumeEVIVoices() {
+  return [
+    { id: 'sample_voice', name: 'Sample Voice', provider: 'HUME_AI' },
+    { id: 'evo_voice', name: 'Evo Voice', provider: 'HUME_AI' }
   ];
-  
-  const emotions: Record<string, number> = {};
-  const random = Date.now();
-  
-  // Select 8-10 random emotions with realistic scores
-  const selectedEmotions = [...emotionCategories].sort(() => 0.5 - Math.random()).slice(0, 10);
-  
-  selectedEmotions.forEach((emotion, index) => {
-    let score: number;
-    if (index < 2) {
-      // Top 2 emotions get higher scores
-      score = 0.3 + (random % 70) / 100.0;
-    } else if (index < 5) {
-      // Next 3 get medium scores
-      score = 0.1 + (random % 40) / 100.0;
-    } else {
-      // Rest get low scores
-      score = (random % 20) / 100.0;
-    }
-    emotions[emotion] = score;
-  });
-  
-  // Add some baseline emotions
-  emotions['Joy'] = 0.45 + (random % 30) / 100.0;
-  emotions['Calmness'] = 0.35 + (random % 25) / 100.0;
-  emotions['Interest'] = 0.25 + (random % 35) / 100.0;
-  
-  return emotions;
-}
-
-// Generate transcript for Hume AI
-function generateHumeTranscript(): string {
-  const transcripts = [
-    "Hello, how are you today?",
-    "I'm feeling pretty good about this conversation.",
-    "This emotion analysis is really interesting!",
-    "I wonder what emotions you're detecting right now.",
-    "Technology like this is amazing.",
-    "I'm excited to see what insights we can discover.",
-    "Voice analysis can reveal so much about how we feel.",
-    "This is a fascinating way to understand emotions."
-  ];
-  
-  const random = Date.now();
-  return transcripts[random % transcripts.length];
-}
-
-// Get top emotion from Hume AI analysis
-function getHumeTopEmotion(emotions: Record<string, number>) {
-  const entries = Object.entries(emotions);
-  if (entries.length === 0) return { name: 'Neutral', score: 0.5, confidence: 50 };
-  
-  const top = entries.reduce((a, b) => a[1] > b[1] ? a : b);
-  return {
-    name: top[0],
-    score: top[1],
-    confidence: Math.round(top[1] * 100)
-  };
-}
-
-// Generate AI response based on Hume AI detected emotions
-function generateHumeEmotionResponse(emotions: Record<string, number>, transcript: string): string {
-  const topEmotion = getHumeTopEmotion(emotions);
-  const topEmotionName = topEmotion.name;
-  const confidence = topEmotion.confidence;
-  
-  const responses: Record<string, string[]> = {
-    'Joy': [
-      "I can hear the joy in your voice! You sound really happy today. What's bringing you such positive energy?",
-      "Your joyful tone is wonderful to hear! It seems like you're in a great mood.",
-      "There's so much happiness in your voice - it's contagious! Tell me more about what's making you feel so good."
-    ],
-    'Calmness': [
-      "You sound very calm and peaceful. That's a lovely state of mind to be in.",
-      "I detect a sense of tranquility in your voice. It's quite soothing to listen to.",
-      "Your calm energy is really apparent. You seem very centered and balanced right now."
-    ],
-    'Excitement': [
-      "I can hear the excitement in your voice! You sound really enthusiastic about something.",
-      "Your excitement is palpable! What's got you so energized?",
-      "There's wonderful excitement in your tone - you sound really engaged and passionate!"
-    ],
-    'Sadness': [
-      "I notice some sadness in your voice. Is everything okay? I'm here to listen.",
-      "You sound a bit down today. Would you like to talk about what's on your mind?",
-      "I can hear that you might be feeling sad. That's completely okay - we all have those moments."
-    ],
-    'Anxiety': [
-      "I detect some anxiety in your voice. Take a deep breath - we can work through whatever is concerning you.",
-      "You sound a bit worried. Remember that it's normal to feel anxious sometimes. What's on your mind?",
-      "I can hear some tension in your voice. Let's talk about what's making you feel anxious."
-    ],
-    'Anger': [
-      "I can hear that you might be feeling frustrated or upset. Would you like to talk about what's bothering you?",
-      "Your voice suggests you're dealing with some strong emotions. I'm here to listen without judgment.",
-      "It sounds like something has really gotten to you. Sometimes talking about it can help."
-    ]
-  };
-  
-  const responseList = responses[topEmotionName] || [
-    `I'm analyzing the emotions in your voice. You seem to be feeling ${topEmotionName.toLowerCase()} quite strongly (${confidence}% confidence).`,
-    `Based on your voice patterns, I'm detecting ${topEmotionName.toLowerCase()} as your primary emotion right now.`,
-    `Your emotional state seems to reflect ${topEmotionName.toLowerCase()}. How does that feel to you?`
-  ];
-  
-  const random = Date.now();
-  return responseList[random % responseList.length];
 }
 
 // Helper function to build voice-optimized system prompt
